@@ -1,0 +1,683 @@
+:root {
+  /* Palette kept in step with the mobile app's design tokens (src/theme.ts). */
+  --bg: #f3f5f7;
+  --card: #ffffff;
+  --card-alt: #f8fafc;
+  --ink: #0f172a;
+  --ink-soft: #334155;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --line: #e6e9ee;
+  --brand: #0f766e;
+  --brand-dark: #115e59;
+  --brand-darker: #0c4a44;
+  --brand-soft: #ecfdf5;
+  --brand-border: #a7f3d0;
+  --accent: #b45309;
+  --accent-soft: #fffbeb;
+  --brand-ink: #ffffff;
+  --danger: #b91c1c;
+  --ok: #047857;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2 {
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.brand {
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.brand span {
+  color: var(--brand);
+}
+
+/* Layout ------------------------------------------------------------------ */
+
+.shell {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 20px 16px 64px;
+}
+
+/* The top bar is the branded band, mirroring the mobile app's teal header. */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 18px 22px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--brand-darker), var(--brand-dark));
+  color: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.topbar .brand {
+  color: #ffffff;
+}
+
+.topbar .brand span {
+  color: #5eead4;
+}
+
+.topbar .muted {
+  color: #99f6e4;
+}
+
+.topbar button.ghost {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.topbar button.ghost:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: radial-gradient(1200px 600px at 50% -10%, #e6fbf5, var(--bg));
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-card .brand {
+  font-size: 26px;
+  text-align: center;
+}
+
+.auth-card > .muted {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+/* Forms ------------------------------------------------------------------- */
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin: 14px 0 5px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
+input::placeholder {
+  color: var(--faint);
+}
+
+.product-form {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.5fr 1.5fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.product-form .field label {
+  margin-top: 0;
+}
+
+.product-form .actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 800px) {
+  .product-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+button {
+  padding: 10px 16px;
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.05s;
+  box-shadow: var(--shadow-sm);
+}
+
+button:hover:not(:disabled) {
+  background: var(--brand-dark);
+  border-color: var(--brand-dark);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: #fff;
+  color: var(--ink);
+  border-color: var(--line);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--card-alt);
+  border-color: var(--faint);
+}
+
+button.ghost.danger {
+  color: var(--danger);
+}
+
+button.ghost.danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+button.link {
+  background: none;
+  border: none;
+  color: var(--brand);
+  font-weight: 600;
+  padding: 10px 0 0;
+  width: 100%;
+  box-shadow: none;
+}
+
+button.link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
+/* Alerts ------------------------------------------------------------------ */
+
+.alert {
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  margin: 12px 0;
+}
+
+.alert.error {
+  background: #fef2f2;
+  color: var(--danger);
+  border: 1px solid #fecaca;
+}
+
+.alert.notice {
+  background: var(--brand-soft);
+  color: var(--ok);
+  border: 1px solid var(--brand-border);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.badge.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge.approved {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge.suspended {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Table ------------------------------------------------------------------- */
+
+.list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.search {
+  max-width: 240px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+td {
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover td {
+  background: var(--card-alt);
+}
+
+td.name {
+  font-weight: 700;
+}
+
+td.price {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  display: block;
+  background: var(--bg);
+}
+
+/* Image-less products get a friendly tinted placeholder, like the mobile app. */
+.thumb.placeholder {
+  border: 1px solid var(--brand-border);
+  background: var(--brand-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumb.placeholder::after {
+  content: "🛍️";
+  font-size: 18px;
+  line-height: 1;
+}
+
+.toggle {
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 999px;
+}
+
+.toggle.on {
+  background: #d1fae5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+
+.toggle.off {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.empty {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* Tabs -------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.tab {
+  background: #fff;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.tab:hover:not(.tab-active) {
+  background: var(--card-alt);
+}
+
+.tab-active {
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-color: var(--brand);
+}
+
+.tab-badge {
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tab-active .tab-badge {
+  background: #fff;
+  color: var(--brand-dark);
+}
+
+/* Order detail ------------------------------------------------------------ */
+
+.drawer {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.badge.confirmed,
+.badge.preparing {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.badge.delivering {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.badge.delivered {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge.cancelled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.cancel-box {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-top: 10px;
+}
+
+.cancel-box .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.delivery-box {
+  border: 1px solid var(--line);
+  background: var(--card-alt);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.delivery-box .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.delivery-box a {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.call-link {
+  display: inline-block;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-border);
+  color: var(--ok);
+  border-radius: var(--radius-sm);
+  padding: 9px 13px;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.call-link:hover {
+  background: #d1fae5;
+}
+
+/* --- New-order alert (the one thing that must not be missed) --------------
+   Deliberately loud: full-width, high contrast, and it does not dismiss itself.
+   A shopkeeper misses an order and the customer waits for something that never
+   arrives — the worst failure this product has. */
+
+.order-alert {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow);
+  /* Pulses so it catches the eye in peripheral vision — a shopkeeper is
+     serving a customer, not reading the screen. */
+  animation: order-alert-pulse 1.6s ease-in-out infinite;
+}
+
+.order-alert-urgent {
+  border-color: var(--danger);
+  background: #fef2f2;
+  animation-duration: 0.9s; /* Overdue: more insistent. */
+}
+
+@keyframes order-alert-pulse {
+  0%, 100% { box-shadow: var(--shadow); }
+  50% { box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.18); }
+}
+
+.order-alert-urgent {
+  animation-name: order-alert-pulse-urgent;
+}
+
+@keyframes order-alert-pulse-urgent {
+  0%, 100% { box-shadow: var(--shadow); }
+  50% { box-shadow: 0 0 0 5px rgba(185, 28, 28, 0.22); }
+}
+
+/* Respect a user who has asked for less motion; the sound, the tab title and
+   the banner itself still do the work. */
+@media (prefers-reduced-motion: reduce) {
+  .order-alert,
+  .order-alert-urgent {
+    animation: none;
+  }
+}
+
+.order-alert-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.order-alert-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.order-alert strong {
+  display: block;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.order-alert-note {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.order-alert-action {
+  flex-shrink: 0;
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.order-alert-action:hover {
+  background: var(--brand-dark);
+}
+
+.order-alert-degraded {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* An escalated order is not routine — the badge should not look like the
+   ordinary "3 pending" count next to it. */
+.tab-badge-urgent {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* --- AI suggestion from a product photo ----------------------------------
+   Framed as something to CHECK, not a finished answer. A low-confidence guess
+   is visually distinct so it cannot be skimmed past — a wrong price that gets
+   waved through reaches a real customer. */
+
+.suggestion {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--brand-border);
+  background: var(--brand-soft);
+}
+
+.suggestion-unsure {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.suggestion-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.suggestion-head strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.suggestion-confidence {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.suggestion-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}

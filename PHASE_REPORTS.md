@@ -1,0 +1,1601 @@
+# Phase Reports — Half-Dinar Shops
+
+Plain-language record of what was built in each phase, what was tested, and what was decided.
+Newest phases are appended at the bottom. `CLAUDE.md` is the technical source of truth; this file is
+the narrative history.
+
+---
+
+## ⚠️ System change made (authorised 2026-07-15) — how to undo it
+
+The founder explicitly authorised **one** system-level change: two Windows Firewall rules so a real
+phone can reach the development server over Wi-Fi. Nothing else system-wide was touched — the
+network was deliberately **left classified as Public**, as instructed.
+
+**What was added:**
+
+| Rule | Port | Scope |
+|---|---|---|
+| `Half-Dinar Dev - Expo dev server (8081)` | TCP 8081 | Local subnet only |
+| `Half-Dinar Dev - API (3000)` | TCP 3000 | Local subnet only |
+
+Both are **inbound, local-subnet only** — never exposed to the public internet.
+
+### 👉 To remove them (run any time)
+
+Right-click PowerShell → **Run as administrator**, then:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\MY NEW APP\scripts\remove-firewall-rules.ps1"
+```
+
+Or remove them by hand:
+
+```powershell
+Remove-NetFirewallRule -DisplayName "Half-Dinar Dev - Expo dev server (8081)"
+Remove-NetFirewallRule -DisplayName "Half-Dinar Dev - API (3000)"
+```
+
+To check what is currently in place:
+
+```powershell
+Get-NetFirewallRule -DisplayName "Half-Dinar Dev*"
+```
+
+To add them back again: `powershell -ExecutionPolicy Bypass -File "C:\MY NEW APP\scripts\add-firewall-rules.ps1"` (as administrator).
+
+> **Security note:** while these rules are active, other devices **on the same network** can reach
+> the development backend. That is fine on a home or office network; on shared/public Wi-Fi, remove
+> them when not testing.
+
+---
+
+## Phase 1 — Database Foundation ✅
+
+**Built:** PostgreSQL 16.14 in Docker (port 5433), the full 8-table schema via Prisma 7, and an
+idempotent seed script (1 merchant "Al-Nus Dinar Shop", 8 categories, 20 products, 3 test accounts).
+
+**Proven:** 18 database tests passing. Every constraint is tested by *trying to break it* — negative
+prices, zero quantities, invalid ratings, and orders pointing at non-existent products are all
+rejected by the database itself, not merely by app code. Two results matter most:
+
+- **`price_at_order` never changes.** An order placed at 0.50 JOD still reads 0.50 after the product
+  is repriced to 9.99.
+- **Order history cannot be destroyed.** Deleting a product that appears in a past order is blocked.
+
+Prices are exact decimals, not floating-point, so 0.50 JOD is genuinely 0.50 with no drift.
+
+**Decisions:** 11 CHECK constraints were hand-written in SQL (Prisma cannot express them). A full
+drop → migrate → seed rebuild was verified to reproduce identical data.
+
+---
+
+## Phase 2 — Merchant Backend + Dashboard ✅
+
+**Built:** The NestJS API (phone+OTP login, JWT auth, merchant registration, product CRUD, stock
+toggle, category list, photo upload) and a React web dashboard for the shopkeeper.
+
+**Proven:** 20 products added **through the real dashboard UI in a real browser**, verified present
+in the database with exact prices. 59 automated tests passing (18 database + 32 API + 9 browser).
+
+**Bugs found by actually running it:**
+
+- **The rate limiter throttled the entire API to 3 requests/minute.** The strict limit intended only
+  for the login-code endpoint was being applied to every route — the dashboard would have died after
+  three clicks. Fixed, with a regression test.
+- **One of my own tests was wrong.** It claimed the server rejects negative prices via the UI, but
+  the browser blocks them before any request is sent — so it was testing nothing. Rewritten.
+
+**Security:** every checklist item is backed by a test that tries to break it. Login codes are
+argon2-hashed (never plaintext), single-use, expire in 5 minutes, and lock after 5 wrong guesses. A
+customer's login is refused from every merchant endpoint. One shop cannot see or touch another's
+products even knowing the exact ID. Uploaded "photos" are validated by real file contents, so a
+script renamed `.png` is rejected. Authentication **fails closed** — endpoints are protected unless
+explicitly marked public.
+
+**Decisions:**
+
+1. **Added a ninth table, `otp_codes`.** The specified schema had nowhere to store login codes, but
+   the security rules require them hashed. None of the eight specified tables were altered.
+2. **Shops awaiting approval can still build their product list** (they stay invisible to
+   customers). Otherwise a new merchant could do nothing while waiting, and Phase 2 would have been
+   untestable before Phase 7 existed.
+3. **Login codes appear on screen** because there is no SMS provider yet — development only, and the
+   app refuses to start in production with this enabled.
+
+---
+
+## Phase 3 — Customer App: Browse Only ✅
+
+**Built:** The Expo/React Native customer app (phone+OTP sign-in, location with manual fallback,
+browse, category filter, search) and the customer browse API.
+
+**Proven:** 94 automated tests passing (18 database + 49 API + 10 dashboard + 17 customer app). All
+20 products verified **by name and exact price** — not a spot check.
+
+**The approved-only rule — confirmed three ways:**
+
+1. Built into the query layer: every customer query pins one shared filter, so a future query cannot
+   silently omit it. An unapproved shop returns "not found", never "forbidden" — its existence
+   cannot be probed.
+2. **Deliberately broke it.** Removing the filter made 3 tests fail immediately, proving the tests
+   catch the bug rather than passing for the wrong reason. Then restored and re-verified.
+3. **Proven through the real app**: suspending the pilot shop made the customer app show "No shops
+   open yet" with no products; approving it brought all 20 straight back.
+   (`mobile/scripts/verify-approved-only.sh` re-runs this whole check.)
+
+**Behaviour:** location never blocks shopping — allow it, refuse it, or dismiss everything, and the
+shop stays fully browsable. Out-of-stock items are shown but marked and sorted last. Category filters
+only offer categories the shop actually stocks, so no filter is ever a dead end.
+
+**A flaw found in my own testing:** the first screenshots came back 1280px wide — a mobile app being
+tested at desktop width, because a device preset silently overrode the phone viewport. Every test
+passed regardless, which is exactly the kind of green tick that means nothing. Fixed to a real Pixel
+7 viewport and re-run.
+
+---
+
+## Fix — Expo Go version mismatch (2026-07-15)
+
+**Problem:** Expo Go on the founder's phone refused to open the project: *"you need a newer
+version"*.
+
+**Cause:** the app was scaffolded on Expo SDK 57 (the current npm `latest`), but **Expo Go on the
+App Store and Play Store is frozen at SDK 54** — Apple has not approved a newer build, and Expo's own
+SDK 57 release notes say they are *"still waiting on approval."* Running SDK 57 on a real iPhone
+requires `eas go`, which needs a **paid Apple Developer membership** ($99/yr).
+
+My earlier assumption that the project was already aligned was wrong; the founder's diagnosis was
+correct.
+
+**Fix:** the app was downgraded to **Expo SDK 54** (React Native 0.81.5, React 19.1.0).
+
+**Verified:**
+
+- The dev server now advertises `runtimeVersion: exposdk:54.0.0` — the exact field Expo Go reads to
+  decide compatibility. It previously said `57.0.0`, which caused the error.
+- All 15 customer-app browser tests pass on SDK 54; `expo-doctor` 18/18; `npm audit` 0
+  vulnerabilities (two dev-only transitive vulnerabilities are patched by overrides rather than by
+  downgrading Expo).
+- Verified over the real Wi-Fi address: the manifest and the API are both reachable, and the app
+  resolves the backend automatically from the Expo host address.
+
+**A trap caught in my own setup:** the dev server had been started with
+`EXPO_PUBLIC_API_BASE=http://localhost:3000/api`, which is baked into the bundle — on a phone,
+"localhost" means the phone itself, so it would have failed. Plain `npx expo start` is correct and
+was re-verified.
+
+**Note:** SDK 54 is pinned deliberately. Do not "upgrade" it — see `CLAUDE.md` §11 and
+`mobile/AGENTS.md`. This constrains Expo Go development only; a production build is unaffected.
+
+### How to test on your phone
+
+1. `cd "C:\MY NEW APP\backend"` → `npm run start:prod` (backend)
+2. `cd "C:\MY NEW APP\mobile"` → `npx expo start` (app)
+3. Install **Expo Go** from your app store, scan the QR code, phone on the same Wi-Fi.
+4. Sign in with `0791111111`. The login code appears on screen (no SMS provider yet).
+
+---
+
+## Phase 4 — Cart & Order Placement ✅
+
+**Built:** A basket in the customer app (add/remove, running total, survives closing the app), an
+order summary showing items + delivery fee + total, cash-on-delivery confirmation, and the order
+placement API that writes the order and its items to the database.
+
+**Proven:** 103 automated tests passing (18 database + 73 API + 12 customer app browser). Orders were
+placed **through the real app in a real browser** and then read straight out of the database:
+
+| What the app showed | What the database stored |
+|---|---|
+| 2 × Chocolate 1.00 + Foil 0.90 + 0.50 delivery = **2.40** | `total_price 2.40`, `delivery_fee 0.50`, 2 items |
+| 7 × Chocolate 3.50 + 0.50 delivery = **4.00** | `total_price 4.00`, `price_at_order 0.50` ×7 |
+
+**The price snapshot — proven twice.**
+
+1. On the real orders above: I changed Chocolate Bar's price from 0.50 to **9.99** in the database.
+   Both already-placed orders still showed `price_at_order = 0.50` and unchanged totals (2.40 and
+   4.00). The price was then restored.
+2. **Deliberately broke it:** I rewrote the code to recalculate from the current product price
+   instead of the snapshot — the test caught it immediately. Reverted, and all 73 API tests pass
+   again.
+
+**Customers cannot manipulate prices.** The app sends only product ids and quantities — there is no
+price field in the order request at all. The server reads the real price from the database. Sending a
+price or a total is rejected outright rather than ignored. Tested both.
+
+**Money is exact.** 7 × 0.50 JOD totals exactly 3.50, not 3.4999999999999996 — every calculation uses
+exact decimals end to end, in the app and on the server.
+
+**Also refused, with tests:** ordering an out-of-stock item (names the item), ordering a product from
+a different shop, ordering from an unapproved shop (404, not 403 — its existence stays hidden),
+zero/negative/fractional quantities, empty orders, and duplicate lines. A rejected order writes
+**nothing** — verified there is no partial order left behind.
+
+**Access control:** a merchant cannot place customer orders (403). A customer cannot see another
+customer's order, even with the exact order id (404).
+
+### Decisions I made (founder was away)
+
+1. **Delivery fee set to 0.50 JOD.** ⚠️ **This is a placeholder I chose — please confirm the real
+   fee.** It is not hardcoded: change `DELIVERY_FEE_JOD` in `backend/.env` and restart. The app reads
+   the fee from the server, so the cart, the order, and the database always agree. The app refuses to
+   start if the fee is not a valid 2-decimal amount.
+2. **Duplicate cart lines are rejected** rather than silently merged, so the order can never be
+   ambiguous about intent. The app merges quantities before sending.
+3. **Out-of-stock items have no "Add" button** at all, rather than failing at checkout.
+4. **The basket is cleared the moment an order is placed**, so the same order cannot be sent twice by
+   accident.
+
+### A problem I found and fixed in my own tooling
+
+My "product does not exist" test was passing **for the wrong reason**: it used an all-zeros UUID,
+which is rejected as malformed before the existence check ever runs — so it proved nothing. Rewritten
+to use a valid-but-nonexistent id, and it now asserts the real error. The same weakness in the Phase
+3 browse tests was fixed too.
+
+The test-data cleanup script also had to be reworked: it refused to delete test accounts that had
+orders, which every test account now has. It now removes test orders too — still strictly limited to
+the `[TEST] ` shop prefix and the reserved `+962780000XXX` phone range, so real data can never be
+caught by it.
+
+---
+
+## Phase 5 — Merchant Order Handling Loop ✅
+
+**Built:** An Orders tab in the merchant dashboard (new-order badge, live list, order detail), the
+ability to tick each item off as picked or mark it out of stock, confirm an order, start picking, and
+cancel with a mandatory reason. On the customer side: a "My orders" screen with live status,
+cancellation, and the out-of-stock acceptance flow.
+
+**Proven:** 143 automated tests passing (18 database + 102 API + 10 dashboard + 26 customer app +
+2 approved-only). The full cycle was driven **across both real UIs at once in one browser** — the
+customer app on one screen, the shopkeeper's dashboard on another — with a real order moving between
+them.
+
+### The out-of-stock scenario (the one you asked to see)
+
+Customer orders 2 × Chocolate (1.00) + 1 × Foil (0.90) = 1.90 + 0.50 delivery = **2.40**. The shop
+starts picking and cannot find the foil:
+
+| Step | What happens |
+|---|---|
+| Shop marks foil out of stock | Order is **NOT cancelled** — still "picking items" |
+| Charged total | **Still 2.40** — unchanged, exactly as specified |
+| Shop sees | "Revised 1.50 JOD once the customer accepts" |
+| Customer sees | Foil struck through, "Remove them and your total becomes 1.50 JOD" |
+| Customer accepts | **Only now** does the total become 1.50 in the database |
+
+The surviving items keep their original snapshotted prices — verified by repricing chocolate to 5.00
+mid-flow and confirming the recalculation still used 0.50.
+
+### The cancellation rules — each one tested, two sabotage-checked
+
+| Rule | Status |
+|---|---|
+| Customer cancels freely while pending | ✅ tested (UI + API) |
+| Customer cancels while shop is picking — **warned first** | ✅ tested: dismissing the warning keeps the order, accepting cancels it |
+| Cancellation **blocked** once out for delivery | ✅ tested — **sabotage-verified** |
+| Merchant cancels only after confirming, **reason mandatory** | ✅ tested — **sabotage-verified** |
+| Merchant's reason reaches the customer | ✅ tested: "We are closing early today" appears verbatim in the app |
+| Every item unavailable → order cancelled by SYSTEM | ✅ tested — no delivery fee for an empty bag |
+
+**Sabotage checks:** I made a delivering order cancellable → the test caught it. I made the merchant's
+cancellation reason optional → the test caught it. Both reverted; all 102 API tests pass.
+
+Payment is cash on delivery, so no money moves and there is nothing to refund — as specified.
+
+### Decisions I made (founder was away)
+
+1. **The `CONFIRMED` status follows the same rules as `PREPARING`.** Your spec covers pending,
+   preparing and delivering, but not the state between the shop accepting an order and starting to
+   pick it. Treating it as uncancellable would lock the customer in the instant the shop tapped
+   "confirm", and stop a shop cancelling until it pretended to start picking. Both are worse, so
+   customer-cancel-with-warning and merchant-cancel-with-reason both apply there.
+2. **A merchant cannot cancel a *pending* order** — they must confirm it first. This is your spec
+   read literally ("merchant can cancel only during preparing"). The error message tells them why.
+3. **The dashboard opens on Orders, not Products** — handling incoming orders is a shopkeeper's main
+   job during the day.
+4. **Notifications are an event seam, not real push.** Merchant cancellation fires an immediate
+   event (asserted in tests), and the customer sees the outcome and reason the moment they open the
+   app. Real push (FCM/APNs) needs infrastructure — logged as blocker **B6**.
+
+### Problems found and fixed in my own tooling
+
+- **I forgot to restart the API after rebuilding**, so the tests ran against an old build and failed.
+  The tests were right; I was wrong. Restarted and re-ran.
+- **The merchant dashboard was being tested at phone width**, so a table cell covered the buttons and
+  every merchant test timed out. The dashboard is a laptop app — it now gets its own desktop-sized
+  browser context.
+- **A permanently-red test.** `approved-only.spec.ts` only makes sense while its script flips the
+  shop's status, so a normal full run always showed 1 failure. A suite that is always red teaches
+  everyone to ignore red, so it now runs under its own config and the default suite is fully green.
+- **A test that lied.** I had written "an order out for delivery can no longer be cancelled" as a UI
+  test, but nothing in the UI can reach that state until Phase 6 — so it was asserting something
+  unrelated to its name. Deleted, with a comment saying where the rule *is* tested (the API suite)
+  and when it gets its UI test (Phase 6).
+- **A racy screenshot test** counted rows before the request finished. Fixed to wait for the list or
+  the empty state.
+
+---
+
+## Phase 6 — Delivery (Manual) ✅
+
+**Built:** Manual delivery tracking. The shopkeeper types in who is taking the order (name + phone),
+then moves it along by hand: **assigned → picked up → on way → delivered**, or marks it **failed**.
+The customer app shows the driver's name, full phone number, and live status.
+
+**Proven:** 161 automated tests passing (18 database + 120 API + 10 dashboard + 13 customer app).
+An order was walked through **every** delivery status across both real UIs, checking the customer app
+after each step:
+
+| Shop marks | Customer sees | Order becomes | Can they cancel? |
+|---|---|---|---|
+| Driver assigned | "A driver has been assigned" + name + number | still picking | **Yes** — bag hasn't left |
+| Picked up | "The driver has collected your order" | out for delivery | **No** — blocked |
+| On way | "Your order is on its way" | out for delivery | No |
+| Delivered | "Delivered" | delivered (time stamped) | No |
+| Failed | Cancelled + the reason | cancelled | — |
+
+**The driver's number is shown in full and unmasked**, exactly as you specified — verified by a test
+that asserts the customer sees `+962791122334` with no asterisks. The shop types `0791122334` and it
+is normalized automatically.
+
+**Cancellation locks at exactly the right moment.** While a driver is merely *assigned*, the goods
+are still in the shop, so the customer can still cancel. The instant the driver **collects** it, both
+the customer and the shop are blocked — matching your rule that cancellation stops at "delivering".
+
+**Sabotage check:** I made "picked up" stop locking cancellation — 3 tests failed immediately,
+including the one guarding that exact rule. Reverted; all 120 API tests pass.
+
+**Also refused, with tests:** assigning a driver before the shop is picking, assigning two drivers to
+one order, skipping from assigned straight to delivered, moving a delivered order again, a made-up
+status, a non-Jordanian driver number, an empty driver name, and one shop touching another's
+delivery.
+
+### Decisions I made (founder was away)
+
+1. **A failed delivery cancels the order** (`cancelled_by = SYSTEM`, reason "Delivery failed: …").
+   Your spec lists "failed" as a delivery status but not what becomes of the order. Leaving it
+   "delivering" would strand it forever — nobody can cancel at that point, by your own rule. Cash on
+   delivery means no money moved, so cancelling is safe and honest, and the customer can reorder. A
+   shop that intends to retry simply doesn't mark it failed.
+2. **The failure note is mandatory**, because it cancels the customer's order and they are told why.
+3. **Assigning a driver does NOT lock cancellation** — only collection does. Naming a driver is
+   paperwork; the customer shouldn't lose their rights because a name was typed.
+4. **The order status is derived from the delivery status**, never set separately, so the two cannot
+   contradict each other.
+
+### Not done — logged as blockers, not silently skipped
+
+- **The admin side of delivery updates.** Your spec says "updatable from the admin/merchant side".
+  The merchant side is built and tested; the admin panel itself is Phase 7, which reuses the same
+  endpoints. Covered there rather than dropped.
+
+---
+
+## Phase 7 — Direct Contact, Reviews, Admin Panel ✅ (FINAL PHASE)
+
+**Built:** Contextual call buttons, post-delivery reviews, and the admin panel — completing the
+product.
+
+**Proven:** **167 automated tests passing** (18 database + 149 API + 41 browser + 2 approved-only),
+0 vulnerabilities across all three projects.
+
+### The final test — the whole product in one run
+
+A single test drives one order's entire life through **three real UIs in real browsers**:
+
+1. **Admin** signs in, adds a master category
+2. **Merchant** registers a brand-new shop, stocks a product while awaiting approval
+3. **Admin** approves the shop — it becomes visible to customers
+4. **Customer** signs up, browses, adds 2 items, places a cash-on-delivery order (1.50 JOD)
+5. **Merchant** confirms, starts picking — *can call the customer*
+6. **Customer** *can call the shop* while it's being prepared — but not the driver, who isn't involved
+7. **Merchant** assigns a driver, marks collected then on-way
+8. **Customer** *can now call the driver*, **can no longer call the shop**, and **can no longer cancel**
+9. **Merchant** marks delivered → **Customer** leaves a 5-star review
+10. **Admin** sees the finished order and its review
+
+That's Phases 1–7 working together, with nothing stubbed.
+
+### Direct contact — enforced on the server, not just hidden
+
+The rule is *"merchant↔customer during preparing, customer↔captain during on_way"*. Hiding a button
+while still sending the number would be theatre, so **outside its window a phone number is absent
+from the API response entirely**. Six tests cover each transition, and **sabotage-verified**: leaking
+the shop's number at every status made 3 tests fail instantly.
+
+### Reviews
+
+Rating 1–5 plus an optional comment, **only after delivery** and **only once**. Refused: reviewing
+before delivery, reviewing twice, ratings outside 1–5, and reviewing someone else's order.
+
+### Admin panel
+
+Approve/reject/suspend shops, manage master categories (add/rename/delete, one level deep), and view
+every order with cancellations and reviews. **A merchant cannot approve their own shop** — tested,
+because that's the entire point of an approval step. Category deletion is refused while products or
+subcategories still depend on it.
+
+### Decisions I made (founder was away)
+
+1. **"Reject" and "suspend" are the same outcome** — the schema has no `rejected` state, and both
+   mean "invisible to customers and cannot trade". The button says "Reject" for a pending shop and
+   "Suspend" for an approved one.
+2. **The admin panel lives inside the existing web app**, shown by role. Fewer moving parts than a
+   fourth app; the API enforces the role regardless of what the screen renders.
+3. **Categories are limited to one level of nesting**, because that's what both apps render — a
+   deeper tree would exist in the database but be invisible.
+4. **The driver's number appears from "collected", not just "on way"** — from that moment they're
+   holding the customer's goods, and if they can't find the address a call has to be possible.
+
+### Problems found and fixed
+
+- **A real bug, found by looking at a screenshot rather than a green tick.** The admin Overview read
+  *"0 orders · 0 delivered"* while the table directly beneath it listed a delivered order — the stats
+  were fetched once at mount and never refreshed. Fixed, and I added a test that asserts the headline
+  numbers agree with the table under them. I then **re-broke it deliberately** to confirm the new
+  test catches it.
+- **My Phase 1 database tests were brittle**, asserting the database contained *exactly* the seed
+  ("exactly one merchant exists"). Any leftover test data made them fail — reporting a broken seed
+  when the seed was fine. They now scope to the pilot shop: still proving the seed, no longer
+  assuming an empty world. Verified by running them with a deliberate extra shop present.
+- **`beforeAll` picked an arbitrary merchant** with `findFirstOrThrow()` and could silently test the
+  wrong shop. Now pinned to the pilot shop by name.
+- **The approved-only script only suspended the pilot shop**, so a stray approved shop from another
+  test made it fail for the wrong reason. It now suspends every approved shop and restores exactly
+  those it changed — verified by adding a second approved shop and re-running.
+- **Cleanup missed admin-created test categories**; it now removes the `ZZ `-prefixed ones too
+  (children before parents), and refuses to touch any still holding real products.
+
+---
+
+## Final state (all 7 phases complete)
+
+**Test coverage: 167 automated tests, all passing.**
+
+| Layer | Tests | What it covers |
+|---|---|---|
+| Database integrity | 18 | Constraints, price snapshot, cascade/restrict rules |
+| API end-to-end | 149 | Every endpoint, every rule, every role |
+| Customer app (browser) | 30 | Sign-in, browse, location, cart, ordering, tracking, reviews |
+| Merchant dashboard + admin (browser) | 11 | Products, orders, delivery, approvals |
+| Approved-only rule | 2 | Driven by its own script that flips shop status |
+
+**Rules proven by deliberately breaking them (each caught by tests, then reverted):**
+
+1. Customers only ever see approved shops
+2. `price_at_order` is never recalculated from the current price
+3. Cancellation is blocked once out for delivery
+4. A merchant's cancellation reason is mandatory
+5. Collecting an order locks cancellation
+6. Phone numbers are exposed only inside their window
+7. The admin's headline stats match the data below them
+
+**The database is back to exactly the seed**: 3 accounts, 1 shop, 8 categories, 20 products, 0 orders.
+
+### ⚠️ Before you launch — 6 open blockers (see CLAUDE.md §1a)
+
+| # | Blocker |
+|---|---|
+| B1 | Product photos are on local disk — a redeploy destroys them. Needs object storage. |
+| B2 | Rate limiting is in-memory — resets on restart, not shared across instances. Needs Redis + a per-phone OTP limit. |
+| B3 | No SMS provider — login codes are returned in the API response (the app refuses to boot this way in production). |
+| B4 | The customer app stores its login token unencrypted. Needs `expo-secure-store`. |
+| ~~B5~~ | ~~The customer app has never run on a real phone.~~ **CLOSED 2026-07-16** — confirmed running on the founder's real phone (over a hotspot; their home router's AP isolation is a network issue, not an app one). |
+| B6 | No push notifications — a customer won't know their order was cancelled until they open the app. |
+
+### Also waiting on you
+
+- **The delivery fee is a placeholder (0.50 JOD)** that I chose. Change `DELIVERY_FEE_JOD` in
+  `backend/.env` and restart.
+- **UI/visual design** was deliberately left alone, as you asked — the styling is functional only.
+- **The firewall rules I added** are documented at the top of this file, with the command to remove
+  them.
+
+---
+
+## Post-Phase-7 cleanup (same session)
+
+Two things found while doing the final sweep, both fixed:
+
+1. **The backend's `npx tsc --noEmit` was failing** on 6 test files using an outdated supertest type
+   (`SuperTest<Test>`; the library now returns `TestAgent`). The tests all passed and the app built
+   fine — the type annotation was simply wrong — but a typecheck command that always fails is a trap
+   for whoever comes next. Fixed; `tsc --noEmit` is now genuinely silent, and all 167 tests still pass.
+
+2. **My own verification script printed a false "clean"** — a shell `&&` made it echo success even
+   though `tsc` had reported errors. Exactly the kind of green tick that means nothing. Re-run
+   honestly, which is how the issue above was found.
+
+**Verified final state:** backend/dashboard/mobile all typecheck clean, both web apps build,
+`expo-doctor` 18/18 (SDK 54 pin intact), `npm audit` 0 vulnerabilities in all three projects, and the
+database is back to exactly the seed.
+
+---
+
+## Fix — customer app crashed on a real phone ("Something went wrong") (2026-07-16)
+
+**Problem:** the app worked in the browser but crashed to Expo Go's blue "Something went wrong"
+screen on the founder's real phone, every time, right after loading.
+
+**This was blocker B5 — the app had never actually run on a real device.** All my testing was the web
+target, which papers over native-only crashes. That was the gap.
+
+### How I diagnosed it (no device available)
+
+Systematically, ruling things out rather than guessing:
+
+1. **Backend reachable from the LAN IP?** Yes — `http://192.168.1.28:3000/api/shops` returns 401
+   (reachable, needs login). So not a network problem — and a network failure is caught and shown as
+   a friendly message anyway, not a crash.
+2. **Does the native bundle even build?** Yes — exported the Android (Hermes) bundle cleanly, 596
+   modules. So not a build or module-resolution error.
+3. **Dependency mismatch?** No — `expo install --check` says everything matches SDK 54.
+4. **Does it crash when rendered in a native-simulated environment?** I installed `jest-expo` and
+   wrote a render test (the closest thing to a device without one). It rendered fine — meaning it's
+   not a plain render crash, but something jest can't simulate.
+5. **Hermes-only hazards** (lookbehind regex, `Intl`, etc.)? None in the code.
+6. **What does the app do at the very first moment?** Traced the import chain: `App.tsx` →
+   `BrowseScreen` → `location.ts` → `expo-location`, whose native binding runs
+   `requireNativeModule('ExpoLocation')` **at import time**. That runs at startup, before anything
+   renders. **That's the crash** — and it fits every symptom: web works (browser geolocation shim),
+   native crashes, at startup, and jest passed because it mocks the module.
+
+### The fix
+
+- **`expo-location` is now imported lazily** — only `require()`d inside `requestLocation()` when the
+  customer taps "use my location," not at startup. A type-only import keeps the types. Location was
+  always an *optional* feature with a manual fallback, so it should never have been able to crash
+  launch. This is the real defect: an optional feature on the eager startup path.
+- **Added an error boundary** (`src/ErrorBoundary.tsx`) so any future crash shows the **real error
+  message on screen** instead of Expo's generic one.
+- **Added a native render smoke test** (`npm test`, via `jest-expo`) so native-environment rendering
+  is tested from now on, not just web.
+
+### Verified (as far as possible without a device)
+
+- Native bundle builds (597 modules). `expo-doctor` 18/18. `npm audit` 0 vulnerabilities.
+- `expo-location` is no longer imported anywhere at startup — only lazily.
+- **Web still works**: all 15 customer + location Playwright tests pass, including GPS-granted and
+  GPS-denied paths — so the lazy require didn't break the web behaviour.
+- Native render smoke test passes.
+
+### ⚠️ Honest status
+
+This fix matches every symptom and is a real defect worth fixing regardless. **But I could not
+confirm it on physical hardware** — I have no device or emulator. If expo-location's eager import was
+the cause (the strongest hypothesis), the app now works. If something else is also wrong, the error
+boundary will now show the **exact** error on screen instead of the generic crash, and Metro will log
+it too — so the next attempt is diagnosable in seconds.
+
+**B5 stays open** until the founder confirms on the phone.
+
+### What to do on your phone to confirm
+
+1. From `backend/`: `npm run start:prod` (backend on :3000).
+2. From `mobile/`: `npx expo start` — plain, **no** `EXPO_PUBLIC_API_BASE` (that would hardcode
+   "localhost", which on a phone means the phone itself).
+3. Open Expo Go, scan the QR, phone on the same Wi-Fi.
+4. **If it works:** you'll reach the login screen. Sign in as `0791111111` (the code appears on
+   screen — no SMS yet).
+5. **If it still crashes:** you'll now see a screen titled "Something broke" with the real error text
+   (not Expo's generic one), and the same error prints in the `npx expo start` terminal. Send me
+   either and I'll fix it immediately.
+
+---
+
+## Post-launch pass — nearest-shop browsing + visual design (2026-07-16) ✅
+
+Done after the founder confirmed the app runs on their real phone (**which closes B5**).
+
+### 1. Nearest-shop browsing (a real feature, not just data)
+
+The app used to drop the customer straight into the one pilot shop. It now opens on a **shop list**
+that shows every shop, **sorted by how near it is, with the distance on each one**; tapping a shop
+opens its shelf, and a back arrow returns to the list.
+
+- **Demo shops added.** `npm run seed:demo` (in `backend/`) creates **5 extra shops** at real Amman
+  coordinates — Weibdeh (~1.1 km), Shmeisani (~2.0 km), Abdoun (~3.1 km), Sweifieh (~4.8 km), Khalda
+  (~8.8 km) from the downtown pilot — each with its own small catalogue.
+- **Proven in a real browser:** signed in, granted location standing on the pilot's coordinates, and
+  the six shops came back ordered **0.0 → 1.1 → 2.0 → 3.1 → 4.8 → 8.8 km**, nearest first, each
+  showing its distance. A new test (`mobile/e2e/shops.spec.ts`) asserts the order is non-decreasing
+  and that opening a shop shows *its* shelf, not the pilot's.
+- **Clearly test data, cleanup still works.** The demo shops are `[TEST] `-marked, so
+  `npm run db:clean-test-data` removes them like any test shop. I ran the full cleanup (it removed
+  15 test shops, 20 test customers and their orders) and then re-seeded the 5 demo shops — proving
+  both still work. ⚠️ **Note:** because they are test-marked, routine cleanup *deletes* the demo
+  shops; run `npm run seed:demo` again to bring them back.
+- **Location still never gates.** The list works with no location (shown alphabetically); granting
+  GPS re-sorts it. Manual areas were given coordinates so picking an area also sorts by distance.
+
+### 2. Visual design pass — the whole product
+
+The app was functional but plain. It now has a proper identity, applied across **all three UIs** so
+they feel like one product:
+
+- **A real palette and type/spacing system** in one place (`mobile/src/theme.ts`), mirrored into the
+  web dashboard's CSS. Deep-teal branded headers, warm-amber prices, soft-shadowed cards, rounded
+  pill chips and tabs.
+- **Product cards** redesigned, with **friendly emoji placeholders where a photo is missing** (a
+  pencil for a notebook, a cookie for a chocolate bar, soap for bar soap, and so on) — most items
+  have no photo yet, so this is what a shopper mostly sees. The dashboard's image-less rows get the
+  same treatment.
+- **Polished loading / empty / error states** on the shop list and storefront.
+- The **merchant dashboard and admin panel** got the same teal header, pill tabs, soft cards and
+  amber accents, so nothing looks like a different app.
+
+### What I could and couldn't verify
+
+- **Verified (green):** backend 18 database + 149 API tests **with the demo shops present in the DB**;
+  the mobile customer-app browser suite plus the 2 approved-only tests; the 11 dashboard/admin browser
+  tests; `npm audit` **0 vulnerabilities** in all three projects; `expo-doctor` **18/18**. I judged
+  the look by **reading the actual Pixel-7 screenshots**, not by trusting green ticks — that's how I
+  caught (and fixed) a chocolate bar showing a juice-box icon (its name contains "…coCOLAte…").
+- **Could NOT verify without your hardware:** the redesigned screens **on the physical phone**. Same
+  limit as Phase 3 — everything is checked on Expo's web target at a phone-sized (Pixel 7) viewport,
+  which is the same components and logic but not a real device. You've confirmed the app *launches*
+  on your phone; a quick walk through the new shop list and cards on the device is the last check I
+  can't do for you.
+- **A design note, not a limit:** the **merchant dashboard and admin panel are laptop tools** and are
+  verified at desktop width, not phone width. Forcing them narrow hid buttons behind a table cell
+  back in Phase 5, so I deliberately kept them desktop-first while making them *visually* match the
+  phone app.
+
+### How to see it
+
+- **Customer app (phone):** `npm run start:prod` in `backend/`, `npx expo start` in `mobile/`, scan
+  with Expo Go. To see multiple shops sorted by distance, run `npm run seed:demo` in `backend/` first.
+- **Merchant dashboard / admin panel:** open **http://localhost:5173** (`npm run dev` in
+  `merchant-dashboard/`). Sign in with **`0791234567`** for the shopkeeper dashboard, or
+  **`0799999999`** for the admin panel — same app, the role decides the screen. The login code is
+  shown on screen (no SMS yet).
+
+---
+
+# Phase 8 — Hardening for real-world launch
+
+Founder was away for this entire phase, with instructions to work autonomously, pick reasonable
+defaults, log decisions, and never wait. Every decision I made alone is logged under its section.
+
+**Ground rule I followed for anything needing an account/API key/paid signup:** build the full
+integration behind a clean interface, wire it end-to-end, make it genuinely work with a dev
+implementation, and write down exactly what to sign up for and which env var takes the key — so
+pasting one key switches it live with **zero code changes**. Then move on.
+
+---
+
+## 8.1a — Real SMS for login codes (blocker B3) ✅
+
+**Built:** A provider-agnostic SMS seam (`backend/src/sms/`). `AuthService` no longer knows how a
+text message gets sent — it asks the `SmsSender` interface. Two implementations exist: the **console
+sender** (development: prints the code, keeps the existing on-screen `devCode` path working) and a
+real **Twilio sender**.
+
+**Baseline before I started:** 18/18 database tests, to be sure I was building on green.
+
+### The research changed the plan — Jordan is not like everywhere else
+
+I looked up Jordan's actual SMS rules rather than assuming. Four findings that matter:
+
+| Finding | Consequence |
+|---|---|
+| **Alphanumeric Sender ID needs pre-registration, ~12 days** | ⏰ **This is the long pole for launch.** Start it now, not on launch week. |
+| **Zain and Orange block generic sender IDs** | Without registration codes **do not arrive at all** on two major networks — not "look generic". |
+| **Long/short codes unsupported domestically** | You cannot just buy a Jordanian number and text from it. |
+| **Promotional SMS needs an `adv` prefix and is banned after 9pm Amman** | Our login SMS must stay strictly transactional or risk being reclassified and blocked at night. **There is now a test pinning this.** |
+
+### Decisions I made (founder away)
+
+1. **Chose Twilio.** Reason: **self-serve signup with a card**, so the founder can complete it alone
+   today. Unifonic and regional aggregators are sales-led (quote, contract, call) — that could take
+   longer than the build did. Twilio also handles the Jordanian carrier registration paperwork.
+   ⚠️ **At real volume a regional aggregator is usually cheaper per message** — that's a month-three
+   optimisation, and switching is one new class (see below).
+2. **Used `fetch`, not the `twilio` SDK.** The call is one form-encoded POST; the SDK is a large
+   dependency and audit surface for that. Keeps `npm audit` at 0.
+3. **Provider is auto-detected from credentials**, not a mode flag. Pasting the keys IS the switch —
+   that's the "zero code changes" requirement taken literally. `SMS_PROVIDER` exists only to force a
+   choice explicitly.
+4. **A failed send returns 503 to the customer.** Silently swallowing it would leave someone staring
+   at a code box waiting for a text that is never coming. The provider's error detail is logged, not
+   returned — provider errors can name the account, and this endpoint is public.
+
+### Proven — 16 new tests, 165/165 backend tests passing
+
+The test that matters: **it extracts the 6-digit code from the SMS body text and signs in with it.**
+That proves the message a real customer receives carries a code that genuinely works — as opposed to
+proving a mock got called, which is the trap here.
+
+Also proven:
+- Credentials alone flip the provider to Twilio; removing them falls back to console. **No code
+  change** — the headline requirement, tested.
+- The exact HTTP request to Twilio: URL, `To`, `From`, body, and Basic auth header decode.
+- A Twilio rejection and a network timeout each surface as a customer-visible error, not a hang.
+- **Production refuses to boot without a real provider** — so a deploy that forgets the keys fails
+  loudly instead of booting healthy and never logging anyone in. This is B3's guard, extended.
+- Half-configured credentials are refused rather than silently falling back to printing codes to a
+  log — partial credentials mean the intent to go live is obvious.
+
+### A bug my own test caught
+
+My first version of the factory called `new ConsoleSmsSender()` internally while DI registered a
+*separate* instance. So the app sent messages into an outbox **no one else held a reference to** —
+`app.get(ConsoleSmsSender)` returned an object that had never been used. The outbox test failed
+immediately and exposed it. Fixed by injecting the DI-managed instance. Had I asserted against the
+factory's own instance instead, it would have passed for the wrong reason.
+
+I also got the expected HTTP status wrong (asserted 201; the endpoints are explicitly
+`@HttpCode(HttpStatus.OK)`). The code was right, my test was wrong — checked the controller and
+fixed the test, rather than changing the app to match my assumption.
+
+### 👉 What the founder needs to do — full instructions in `docs/SMS_SETUP.md`
+
+**Do Step 2 first — the ~12-day Sender ID approval is the only thing here that can delay launch.**
+
+1. Create a Twilio account (self-serve) and **upgrade to paid** (trial can only text verified numbers).
+2. **Register an Alphanumeric Sender ID for Jordan** (suggest `HalfDinar`) — **~12 working days**.
+3. Paste 3 values into `backend/.env`: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`,
+   and set `EXPOSE_OTP_IN_RESPONSE=false`. Restart. **That's the entire change.**
+
+Cost: roughly **$0.04–0.09 per SMS to Jordan**. Every login costs money, which is exactly why the
+per-phone OTP limit in 8.1d matters.
+
+### ⚠️ What I could NOT verify
+
+**A real SMS arriving on a real Jordanian phone.** That needs a paid account and an approved Sender
+ID, neither of which I can create. Everything up to Twilio's API boundary is tested; delivery from
+Twilio to a Zain/Orange handset is the one step only the founder can confirm (Step 5 in the doc).
+
+---
+
+## 8.1b — Cloud storage for product photos (blocker B1) ✅
+
+**Built:** A storage seam (`backend/src/storage/`). The upload endpoint no longer knows where bytes
+land — it asks the `ImageStorage` interface. **Local disk** (development, unchanged behaviour) and
+**S3-compatible object storage** (production) both implement it.
+
+### Decisions I made (founder away)
+
+1. **Recommended Cloudflare R2, not AWS S3.** Reason: **no egress fees**. Product photos are read
+   constantly by every browsing customer and written rarely — on S3 you pay for every read. Plus a
+   10 GB free tier the pilot will not approach. **The code is not R2-specific**: it targets the S3
+   API, so R2/S3/B2/Spaces/MinIO all work by changing the endpoint. No lock-in.
+2. **Production refuses to boot on local disk**, mirroring the SMS guard. B1 otherwise fails
+   *silently* — photos just vanish on the next redeploy with no error anywhere.
+3. **Did not write a migration script** for existing photos. They are development test data, and most
+   seeded products have no photo at all. Re-uploading the few real ones is faster than maintaining a
+   script for throwaway data. Noted in the doc.
+4. **Kept magic-byte validation in the upload service, not the storage layer.** "Only real images"
+   must hold no matter where bytes go, so no future backend can weaken it.
+
+### 🐛 A silent, invisible bug this found — worth reading
+
+Both the customer app and the dashboard built photo URLs by **always** prepending the API address to
+`image_url`. Correct for a local path (`/uploads/x.jpg`), catastrophic for a cloud URL:
+
+```
+http://localhost:3000https://pub-abc123.r2.dev/products/x.jpg
+```
+
+**Every product photo would have silently stopped loading the day the founder pasted in the R2
+keys** — no error, no crash, no failing test, nothing in a log. Just broken images and a baffling
+afternoon, with the storage switch as the last thing anyone would suspect.
+
+Both clients now pass absolute URLs through untouched, with a test
+(`mobile/__tests__/imageSrc.test.ts`) pinning **both** shapes.
+
+### Proven — 15 new backend tests (180/180 backend), 4 new mobile tests
+
+- Local storage **reads the bytes back off disk** and byte-compares them to the input, rather than
+  trusting a resolved promise. Two uploads never collide on a filename.
+- Credentials alone switch storage to S3; removing them falls back to local. Half-configured
+  credentials are refused rather than silently using disk.
+- The exact S3 command is asserted: bucket, content type, body bytes, and a **server-generated key**
+  (`products/<uuid>.jpg`) the client cannot influence.
+- An upload failure surfaces to the merchant instead of returning a URL to nothing.
+- **Production refuses to boot on local disk.**
+- **Phase 2's security rules survived the refactor — re-tested, not assumed:** a shell script
+  disguised as `innocent.png` is still rejected on magic bytes, and a customer still gets 403.
+
+### 👉 What the founder needs to do — full instructions in `docs/STORAGE_SETUP.md`
+
+~15 minutes, **no approval wait** (unlike SMS): create a Cloudflare account → make an R2 bucket →
+enable public access → create a scoped API token → paste 5 values into `backend/.env` → restart.
+Free tier covers the pilot.
+
+### ⚠️ What I could NOT verify
+
+**A real upload to a real R2 bucket** — needs a Cloudflare account with a payment card. Everything up
+to the S3 API boundary is tested against the real `@aws-sdk/client-s3`, including the exact command
+sent. That the bucket accepts it and the public URL serves it is Step 6 in the doc.
+
+---
+
+## 8.1c — Encrypted auth token on the phone (blocker B4) ✅
+
+**Built:** The customer app's 7-day JWT now lives in the device's **encrypted keystore** (iOS
+Keychain / Android Keystore) via `expo-secure-store@15.0.8`, installed with `npx expo install` so the
+**SDK 54 pin stayed intact** (verified: expo 54.0.36, RN 0.81.5, expo-doctor 18/18, audit 0).
+
+### Two traps avoided — both would have been silent disasters
+
+1. **`expo-secure-store` is native-only and does not exist on web.** The entire mobile browser test
+   suite runs on Expo's web target. A naive swap would have turned every one of those tests red — for
+   an entirely bogus reason. Storage is now platform-aware: keystore on native (**what ships**),
+   AsyncStorage on web (**a test harness, not a product**).
+
+2. **Its native binding runs at import time — the exact shape of the crash that broke the app on the
+   founder's phone before** (`expo-location`, see the "Native startup crash" note). And `storage.ts`
+   **is** on the eager startup path — the app reads the token before rendering. So it is
+   `require()`d **lazily inside the function**, with an `import type` for types only. Verified by
+   grep: no eager import exists. A broken module now degrades to "please sign in again" instead of a
+   fatal launch crash.
+
+### 🔑 The detail that actually closes B4 (and would have been easy to miss)
+
+Simply switching to SecureStore **does not close the vulnerability.** A customer who already signed
+in has a plaintext JWT sitting in AsyncStorage — switching stores leaves it **exactly where it is**,
+readable, for the rest of the token's life. The app would look fixed while the precise thing B4
+describes carried on being true, and the customer would *also* get silently signed out for no reason.
+
+So `loadToken()` **migrates**: on first run after the upgrade it moves the legacy token into the
+keystore and **deletes the plaintext original** — and deletes it even if the keystore write fails,
+because failing to encrypt is recoverable (sign in again) while leaving the plaintext copy behind
+*is the vulnerability itself*. Sign-out clears **both** locations via `Promise.allSettled`, so one
+failure cannot abandon the other and leave a usable token on a signed-out device.
+
+### Decisions I made (founder away)
+
+1. **A failed keystore write does NOT fall back to plaintext.** The tempting "don't lose the
+   session" fallback silently reintroduces B4. Losing persistence costs one extra sign-in; storing
+   the token unencrypted costs the customer their account. **This is the sabotage test below.**
+2. **The delivery area stays in AsyncStorage** — it is not a secret.
+
+### Proven — 10 new tests, sabotage-verified
+
+All 10 pass, and I **deliberately broke it**: I added the plausible-looking plaintext fallback on
+keystore failure. The test *"never falls back to plaintext when the keystore write fails"* failed
+immediately and alone — the right test, for the right reason. Reverted; 19/19 mobile tests green.
+
+Covered: token goes to the keystore and nothing lands in plaintext; migration moves and deletes the
+legacy copy; migration still deletes it when encryption fails; a keystore read failure does not crash
+startup; sign-out clears both stores even when one delete fails.
+
+### 🐛 A latent test bug this exposed
+
+Adding a second mobile test file made the **existing** native-smoke suite fail — and revealed two
+real problems it had been hiding:
+
+- **`jest.config.js` matched only `*.test.tsx`**, so my new `*.test.ts` file was **silently ignored
+  and reported green while running zero tests.** Widened to `*.test.@(ts|tsx)`.
+- **native-smoke leaked async work.** Screens fetch on mount against a server that is not running;
+  its `renderAndSettle` awaited a single microtask, so requests rejected *after* teardown ("Cannot
+  log after tests are done"). It passed only because it was the **only** suite — pure luck of
+  timing. `fetch` is now stubbed so mounts are deterministic, and the settle drains the full task
+  queue. Verified stable across **3 consecutive full runs** (19/19 each).
+
+### ⚠️ What I could NOT verify
+
+**That the OS genuinely encrypts the value at rest.** That is a Keychain/Keystore guarantee and can
+only be observed on physical hardware, which I do not have. What I *can* test — and what actually
+goes wrong in practice — is the **routing**: that the token is handed to the keystore API and never
+to plaintext, that the legacy copy is destroyed, and that failures degrade safely. That is what the
+10 tests cover. The remaining risk is the OS keeping its own contract.
+
+---
+
+## 8.1d — Rate limiting that survives a restart (blocker B2) ✅
+
+**This one is fully verified locally — no account needed**, because Redis runs in Docker.
+
+**Built:** Rate-limit counters moved from the app's own memory into **Redis** (added to
+`docker-compose.yml`, host port 6380). Plus the **per-phone-number OTP limit** B2 explicitly asked
+for, which the IP throttler structurally cannot express.
+
+### Why the per-phone limit matters (it is not a duplicate of the per-IP one)
+
+A per-IP limit does not stop a botnet picking **one victim's number** and requesting codes from a
+thousand IPs — every individual IP stays inside its budget, the victim's handset is flooded, and
+**the founder pays ~$0.04–0.09 for every message**. The per-IP limiter cannot see that pattern; it
+is not looking at the number. Default: **5/hour per number** — generous for a real person (mistype,
+delayed SMS, a retry) and pointless for abuse. Keyed on the **normalized E.164** number, so
+`0791234567` and `+962791234567` cannot each claim a budget.
+
+### Decisions I made (founder away)
+
+1. **The per-phone limiter fails OPEN when Redis is unreachable.** If Redis hiccups, the choice is
+   "nobody in Jordan can log in" vs "the per-phone cap is briefly unenforced while the per-IP limit
+   and the 5-wrong-attempts lock both still apply". A total login outage is clearly worse. Logged as
+   an error so it cannot pass unnoticed, and **pinned by a test** so it stays a choice, not an
+   accident.
+2. **Redis persistence is off.** Counters are short-lived and rebuildable; disk writes would be pure
+   overhead. Losing them on a container restart costs at most one window of budget.
+3. **Host port 6380**, matching the existing 5433-for-Postgres convention (avoid clashing with any
+   Redis already on the machine).
+4. **Kept ioredis's offline queue ON** — see the bug below.
+
+### Proven — 18 new tests against the REAL Redis, plus a live restart
+
+The tests deliberately use **real Redis, not a mock**. The rest of the suite disables the rate-limit
+guard so it does not throttle itself — which means **nothing else in this project exercises Redis at
+all**. And B2's two claims (survives restart, shared between instances) are exactly what a mock
+cannot demonstrate.
+
+- **Survives a restart:** a brand-new client inherits the count (3, not 1).
+- **Shared between instances:** two clients draw down one budget.
+- **A control test proves the old behaviour was genuinely broken:** a fresh in-memory store resets to
+  1. Without it, the Redis tests could be passing for a trivial reason.
+- Window does not slide; counters expire; the per-phone limit blocks the target while a bystander is
+  unaffected; returns 429 matching the IP throttler.
+
+**Then verified live against the running server — this is B2 itself:**
+
+| Step | Result |
+|---|---|
+| Start API | log: `Rate limiting: redis (redis://localhost:6380)` |
+| Hit OTP 4× (limit 3/min) | `200, 200, 200, 429` — counters **visible in Redis** |
+| **Kill the API process** (a redeploy) | counters still in Redis |
+| Start a **fresh** API process | **first request → 429** |
+
+That last row is the whole blocker. Before this change it would have returned `200` — a brand-new
+budget handed out on every redeploy.
+
+### 🐛 A production bug found by running it (not by a test)
+
+My first Redis client used `enableOfflineQueue: false`, which *looks* like sensible "fail fast".
+It also **rejects every command issued before the socket finishes connecting** — so for the first
+moments after each boot, and during any brief reconnect, the phone limiter would error, **fail open,
+and silently stop enforcing**. Switched to ioredis's default queue with bounded retries: brief blips
+ride out, a genuinely dead server still errors promptly rather than stalling the login request.
+
+### 🪤 A trap in my own testing — the lesson from this section
+
+My first live check "proved the opposite": 429s with an **empty Redis**, which looks exactly like
+in-memory throttling. I nearly wrote up that the wiring was broken.
+
+The cause was not the app. **A stale API process from earlier was still holding port 3000**, so every
+new process I started died with `EADDRINUSE` and all my curls hit the *old* build. The tests were
+right; **my manual check was measuring the wrong process.** (`pkill` does not exist on Windows, so
+the "killed" server never died.) Killing PID 22972 and re-running produced the clean result above.
+
+Recorded because it is a genuinely easy way to fool yourself: a green *or* red result from a server
+you did not actually start proves nothing either way.
+
+### A consequence of the fix, handled
+
+Making limits persistent **correctly broke** `throttle.e2e-spec.ts` on a second run within the same
+minute — it asserted "the first N requests succeed", which silently assumed a fresh in-memory
+counter every run. That is the fix working, not breaking. The test now clears its own counters first
+(safe: this Redis holds only ephemeral rate-limit data). Verified repeatable across 3 consecutive
+runs.
+
+### 👉 What the founder needs to do — full instructions in `docs/REDIS_SETUP.md`
+
+**Nothing locally** — it already works. For production, pick any Redis (your host's one-click option,
+Upstash, or Redis Cloud — all have free tiers) and set `REDIS_URL`. Use **`rediss://`** (TLS) for
+anything across the public internet. Sizing is trivial: a handful of self-expiring keys.
+
+---
+
+## 8.1e — The merchant new-order alert ✅ (fully verified in a real browser)
+
+> *"This is the single most important reliability point in the product — if the merchant misses an
+> order, the customer's experience is ruined."*
+
+Taken at its word. This is the one section verified end-to-end with **no simulation anywhere**: a
+real order, placed through the real API, alerting a real dashboard in a real browser.
+
+### The insight that shaped it
+
+The merchant is on the **React web dashboard**, so this is a *browser* problem, not an FCM/push
+problem. That means — unlike customer mobile push — **it can be genuinely verified on this machine**.
+So it was built for real and proven, rather than stubbed and documented.
+
+Before: the dashboard **polled every 10 seconds** and showed a small badge. Two separate failures:
+
+| Problem | Fix |
+|---|---|
+| **Not immediate** — an order could sit unseen for 10s before the screen even knew | **Server-Sent Events** push the order the instant it is placed |
+| **Not unmissable** — a silent badge on a laptop the shopkeeper is not looking at | **Four alert channels**, none of which auto-dismiss |
+
+### Unmissable = four channels, because each one alone has a hole
+
+- **Sound, repeating every 3s until acknowledged** — the shopkeeper is serving someone at the
+  counter, not watching a screen. Synthesised with the Web Audio API (no asset that could fail to
+  load).
+- **Tab title alternating `(1) NEW ORDER`** — the dashboard is usually in a background tab.
+- **A desktop notification** — covers the tab being hidden entirely.
+- **A pulsing banner that will not dismiss itself** — covers muted sound and refused notifications.
+
+**Nothing auto-dismisses on a timer.** A timeout would quietly return the shop to exactly the state
+this exists to prevent.
+
+### Decisions I made (founder away)
+
+1. **SSE consumed with `fetch`, not `EventSource`.** EventSource cannot set headers, so it could only
+   authenticate by putting the **7-day JWT in the query string** — where it lands in access logs,
+   browser history and Referer headers. Streaming with fetch keeps the token in the Authorization
+   header, like every other request.
+2. **The 10-second poll was KEPT, deliberately.** The SSE stream is in-process, so behind a load
+   balancer a dashboard on instance A would miss an event from instance B. **The poll is the floor
+   (the order is seen *eventually*); the stream is the ceiling (it is seen *immediately*).** Losing
+   the stream degrades latency, never correctness. The sabotage test below proves both halves.
+3. **The alarm is primed on the sign-in click.** Browsers block audio until a user gesture. Without
+   priming there, **the first alarm of every session would be silently swallowed** by the autoplay
+   policy — no error, no sound, quite possibly a missed order.
+4. **Events never carry the count**; they only say "look again", and the dashboard re-reads the
+   server. A missed or duplicated event would otherwise leave the badge lying, and the alarm is only
+   as trustworthy as the number behind it.
+5. **Notification permission is asked after sign-in**, not on the login screen where it gets
+   dismissed on reflex ("denied" is sticky). It is 1 channel of 4, not the mechanism.
+
+### 🐛 A bug I introduced and caught
+
+My first version had the Dashboard call `alertSound.stop()` on acknowledge, with the sound effect
+keyed on a simple `active` boolean. That meant **a second order arriving while the first was still
+pending would never re-alarm** — silence at the busiest possible moment, which is exactly when it
+matters most. Fixed by tracking an *acknowledged count* rather than a dismissed flag. There is now a
+test named for that scenario.
+
+### Proven — 9 new browser tests (dashboard suite now 20/20), sabotage-verified TWICE
+
+Every test places a **real order through the real API** and drives the **real dashboard**:
+
+- The alert appears with **no reload and no click** — starting from a verified-quiet dashboard, so
+  "it appeared" means something.
+- **The alarm genuinely plays audio.** The test instruments `AudioContext.createOscillator` and
+  counts real oscillator starts — a silent badge would fail this.
+- **The alarm REPEATS** — counted across a 4s window. A single beep is missable.
+- It does **not** dismiss itself while the order still waits.
+- **A second order re-alerts** after the first was acknowledged.
+- Acknowledging silences it, opens Orders, and restores the tab title.
+- The badge count agrees with the alert.
+
+**Sabotage #1 — killed the SSE stream.** Proved *both* claims at once:
+- The immediacy test **failed** → it genuinely measures the push, not the poll.
+- **The other 8 still passed**, at ~13s instead of ~4s → **the poll fallback genuinely works**. With
+  the stream dead the shopkeeper is still alerted, just slower.
+
+**Sabotage #2 — made the alarm beep once instead of repeating.** *"plays audio"* still passed (it
+does beep), while *"REPEATS until acknowledged"* failed. The two tests measure genuinely different
+things, which is the point.
+
+---
+
+## 8.2b — Escalation when a shop ignores an order ✅
+
+**Asked for:** new order → merchant response window → if ignored, second alert → still ignored, alert
+admin and let the customer cancel.
+
+### First I checked what already existed, rather than building a duplicate
+
+**"Let the customer cancel" already works.** An ignored order is still `PENDING`, and
+`CUSTOMER_FREE_CANCEL` has always allowed a free, unwarned cancel there. Building a second path would
+have duplicated a live rule and risked contradicting it.
+
+What was genuinely missing: the second merchant alert, the admin alert — and **telling the customer**.
+They could always cancel; nothing ever told them the shop had not looked at their order, so they just
+waited in silence. That is the real gap, and it is now filled (`shopUnresponsiveNotice`).
+
+### 🔑 The design decision that matters most
+
+**Escalation level is DERIVED from the order's own timestamp and status — never stored in a flag,
+never held in a timer.**
+
+The obvious implementation (a `setTimeout` when the order is placed) is quietly broken: **every
+pending escalation dies on restart.** Redeploy the API and every currently-ignored order is silently
+forgiven — precisely the orders that most need chasing, forgotten by the very mechanism meant to
+catch them.
+
+Deriving it means the answer is correct after any restart, identical on every instance, and cannot
+drift from reality. Timers still exist, but **only** to push an alert promptly to an already-open
+dashboard; a periodic **sweep** re-checks every pending order and is the actual guarantee. There is a
+test that creates an ignored order with **no timer ever scheduled** — the post-restart case — and
+proves the sweep still finds it.
+
+### Decisions I made (founder away)
+
+1. **Windows: 2 minutes → nudge the shop, 5 minutes → tell the admin.** Both configurable
+   (`ESCALATION_FIRST_ALERT_SECONDS`, `ESCALATION_ADMIN_ALERT_SECONDS`) — the right values are a
+   business call, and tests must not wait real minutes.
+2. **Only `PENDING` counts as ignored.** Once a shop confirms, it has demonstrably seen the order;
+   how long it then takes to pick is a different problem with a different remedy.
+3. **The customer is only warned at level 2.** Telling someone "your shop is slow" after two minutes
+   would abandon more orders than it saves.
+4. **The admin's queue is a derived list, not an inbox.** Nothing to mark as read, nothing to get out
+   of sync — it shows what is true right now, longest-waiting first.
+5. **The admin gets the shop's phone number**, because their actual job here is to ring the shop.
+6. **Re-alerting is suppressed per level**, so a sweep does not re-alarm every 30 seconds. A
+   shopkeeper alarmed repeatedly about one order stops trusting alarms.
+
+### Proven — 20 backend tests + 3 browser tests
+
+Backend (time injected, never slept): the level rises 0→1→2 on schedule, stops the instant the shop
+confirms, is **identical after a restart**, the sweep finds a timerless ignored order, does not
+re-alert on repeat sweeps, and a stale timer cannot escalate an order that has since been confirmed.
+
+**Each role's view is asserted separately**, because "escalation works" is meaningless if it lands in
+the wrong place:
+- **Admin** sees it with the shop's number and waiting time; a shop inside its window is absent.
+- **Merchant** sees their own order flagged with a plain-English notice.
+- **Customer** is told the shop has not responded *and* that cancelling is free.
+- **A merchant cannot read the admin's queue** (403) — it names other shops and their phone numbers.
+  A customer cannot either. Unauthenticated is 401.
+
+**Browser (real UI, real order, short windows via env):** an ignored order reaches the admin with a
+clickable shop number; **the badge is visible from another section without going looking**; and an
+order the shop confirms **never** reaches the admin.
+
+### A real UX issue found by testing
+
+My first admin poll was 60 seconds. The API was perfect (verified directly — the queue returned the
+order with `escalationLevel: 2`), but the *screen* took up to a minute to show it. On the last line
+of defence for a missed order — where a customer is already waiting — that wasted 20% of the
+escalation window for no reason. Tightened to 20s; one request per 20s from a single admin is
+nothing.
+
+---
+
+## 8.1f — Customer push notifications (blocker B6) ⚠️ CODE-COMPLETE, NOT PROVEN ON A PHONE
+
+**Built:** A push seam (`backend/src/push/`) wired into `NotificationsService` — the exact seam B6
+named. Console sender in dev, **Expo** in production. Plus the mobile side (`mobile/src/push.ts`),
+device registration on sign-in, and de-registration on sign-out.
+
+### Why this half is honest about being unverified (and 8.1e was not)
+
+The merchant alert (8.1e) runs in a **browser**, so I could drive it and prove it. This runs on a
+**phone**, and a notification arriving on a real handset needs an Expo project and physical hardware
+I do not have. So this is the interface + mock + doc path — and it is **labelled as such** rather
+than reported as done. B6 stays OPEN until the founder confirms it on their phone (Step 5 in
+`docs/PUSH_SETUP.md`).
+
+Everything up to Expo's API boundary **is** tested — 19 tests.
+
+### Decisions I made (founder away)
+
+1. **Expo's push service, not raw FCM/APNs.** Near-forced, and good: the app is already Expo, so one
+   API call fans out to both platforms, **no Apple/Google server credentials live in this backend**,
+   and it is free. Going direct would mean an annually-expiring Apple certificate, a Google service
+   account, and two code paths — for no benefit at this size.
+2. **NO production boot guard, unlike SMS and storage.** Deliberate asymmetry: without SMS nobody can
+   log in, and without durable storage photos are destroyed — those must fail loudly. But **the pilot
+   genuinely works without push**; the cost is B6 itself (the customer must open the app), not a
+   broken product. Refusing to boot over it would be the worse trade. It logs loudly instead.
+3. **A tenth table, `device_tokens`.** Same precedent as `otp_codes` in Phase 2: the spec requires
+   notifying the customer but has nowhere to record *which device*. **None of the original eight
+   tables were altered.**
+4. **Only push what a person cares about.** Every internal status change is silent. Pushing
+   bookkeeping trains customers to ignore the notifications that matter.
+
+### The rules that make it safe
+
+- **A push failure can never break the order it reports on.** Every caller is announcing something
+  that already happened — a cancelled order stays cancelled whether or not the phone was reachable.
+  Fire-and-forget; `notifyUser` never throws. **Tested by breaking the push service completely and
+  asserting the cancellation still succeeds.**
+- **The device attaches to the signed-in caller**, from the verified token — never a `userId` in the
+  body. Otherwise anyone could register their phone against a stranger's account and receive that
+  stranger's order notifications. **Tested: a smuggled `userId` is rejected (400), not ignored.**
+- **One customer cannot silence another's phone.** A push token is not a secret (it is handed to
+  Expo), so unregistering is scoped by user *and* token. **Tested.**
+- **`expo-notifications` is required LAZILY** — the same rule that fixed the native startup crash.
+  Verified by grep: only an `import type` exists at module scope.
+
+### 🪤 The trap this found — Expo returns HTTP 200 for a FAILED notification
+
+Expo answers `200 OK` and reports the real outcome **per message** in the body. Checking only
+`response.ok` — the obvious implementation — would count an **undelivered** notification as
+delivered, and the customer would silently never hear about their cancelled order. Handled, and
+pinned by a test named for it.
+
+### Proven — 19 tests (backend 238 total), mobile 19/19, expo-doctor 18/18, audit 0
+
+The exact Expo request (high priority + sound — a silent notification defeats the point for a waiting
+customer); a customer with a phone **and** tablet gets both; a token that changes hands (shared family
+phone) follows the **new** owner; dead tokens are dropped rather than retried forever; the shop's
+cancellation reason reaches the customer **verbatim**; internal statuses are not pushed; and the full
+endpoint security set above.
+
+### 👉 What the founder needs to do — full instructions in `docs/PUSH_SETUP.md`
+
+1. `npx expo login && npx eas init` in `mobile/` — ⚠️ **this writes a `projectId` into `app.json` and
+   is not optional; without it no device can ever get a token.**
+2. Set `PUSH_PROVIDER=expo` in `backend/.env`. Restart. That is the whole backend change.
+3. **Android works immediately. iOS needs the paid Apple Developer account** ($99/yr — the same one
+   from the SDK-54 note). If the pilot is Android-first, this can wait.
+
+### ⚠️ What I could NOT verify
+
+- **A notification actually arriving on a real phone** — needs the Expo project + hardware.
+- The permission prompt on a real device; iOS delivery at all.
+- **Whether Expo Go is even sufficient** to test this: Expo's own docs say push in Expo Go is limited
+  and recommend a development build. Flagged in the doc so a failed first attempt is not mistaken for
+  broken code.
+
+---
+
+## 8.2a — AI product entry: photograph an item, skip the typing ✅
+
+**The problem, stated plainly:** a half-dinar shop stocks **thousands** of items. Adding each one
+means typing a name, choosing a category, entering a price — on a laptop, thousands of times. That is
+the most likely reason a real shopkeeper abandons their catalogue half-built, and a half-built
+catalogue is an app nobody shops in.
+
+**Built:** The merchant photographs the item — which they were doing anyway, products need photos —
+and the name, category and price fill themselves in to be **checked**. Behind a `ProductVisionAnalyzer`
+seam: canned mock in dev, **Claude vision** in production, one API key to switch.
+
+### 📊 MEASURED, in a real browser — the number you asked for
+
+| | Manual entry | AI-assisted |
+|---|---|---|
+| **Time per item** | **4,482 ms** | **282 ms** |
+| Characters typed | 21 | **0** |
+| Fields filled | 3 | **0** |
+
+**~94% less time per item** on the workflow. But read the caveats, because the headline is
+misleading:
+
+- **This measures the WORKFLOW, not the AI.** The demo analyzer answers instantly. **A live Claude
+  call adds ~1–3s per item, which is NOT in the 282ms.** Realistically: **~2–4s live vs ~4.5s
+  manual** — still faster, *not* 94% faster. I could not measure real latency without a key, and I
+  am not going to quietly present a number that flatters the feature.
+- **The real win is the typing, not the clock.** 0 characters instead of 21. Over 2,000 items that is
+  **~42,000 characters not typed**. The fatigue is what makes people quit, not the seconds.
+- **The typing speed is an assumption** (140ms/char) chosen to be **generous to the manual path** —
+  a real shopkeeper typing unfamiliar names is likely slower, which would widen the gap. Erring fast
+  keeps the comparison honest rather than flattering.
+
+### Decisions I made (founder away)
+
+1. **The AI proposes; the merchant decides — enforced server-side.** Suggestion and creation are
+   separate endpoints. An AI that could write straight to the catalogue would put its mistakes in
+   front of customers at a real price. **A test fails if that ever changes.**
+2. **It cannot invent a category.** The model is handed the shop's real category list and may only
+   return an id from it; anything else is rejected. A free-text category would need reconciling
+   against the master list later — exactly the manual work this removes.
+3. **It never overwrites what the merchant typed.** Only empty fields are filled. A feature that
+   destroys their work gets switched off, and they would be right to switch it off.
+4. **Confidence is shown, and a weak guess looks weak.** Under 50% the banner changes to "Not sure
+   what this is — please fill it in" and restyles. **A confident wrong answer is worse than an honest
+   "not sure"** — it gets waved through.
+5. **Default `claude-opus-4-8`, but `VISION_MODEL` is a config knob.** Product recognition is not a
+   hard reasoning task; **Sonnet is worth trying first if cost matters**. Flagged in the doc.
+6. **Recognition is optional and silent on failure.** The photo uploads first and separately; if the
+   AI is down the merchant just types, exactly as before. It degrades to the old behaviour, never to
+   a dead end.
+
+### 🔒 The security detail worth naming
+
+The AI endpoint **reuses the upload endpoint's exact magic-byte validation** rather than growing its
+own copy. Two validators drift, and the weaker one wins — "the AI endpoint" would be an odd but
+effective way to smuggle a non-image into the system. Tested: a shell script disguised as
+`innocent.png` is rejected there too.
+
+### 🪤 Two traps found while building
+
+- **Structured outputs guarantee the SHAPE, not the TRUTH.** A schema cannot stop the model returning
+  a category id that does not exist, or a price like `"about 0.5"`. Both would have surfaced as a
+  broken dropdown and a corrupted price field. Both are re-checked server-side, both have tests.
+- **A safety refusal returns an EMPTY content array.** Reading `content[0].text` — the obvious
+  implementation — throws a `TypeError` instead of handling the refusal. Caught by checking
+  `stop_reason` first, and pinned by a test.
+
+### Proven — 20 backend tests + 6 real-browser tests
+
+Backend: the exact Claude request (real image bytes, real category ids, half-dinar pricing context,
+structured outputs); invented category rejected while keeping the good name; malformed price
+rejected; nonsense confidence clamped; refusal handled; timeout reported; **the suggestion saves
+nothing**; script-as-png rejected; customer 403; anonymous 401.
+
+Browser (real UI, real photo): fields genuinely fill with **nothing typed**; confidence shown; demo
+mode admits it is demo mode; typed values never overwritten; a corrected suggestion saves the
+**merchant's** value, not the AI's.
+
+### 👉 What the founder needs to do — `docs/AI_VISION_SETUP.md`
+
+~5 minutes: create a key at console.anthropic.com → paste `ANTHROPIC_API_KEY` into `backend/.env` →
+restart. Cost ~**$0.01–0.03 per photo**, paid only when a merchant adds a product — **roughly $20–60
+one-off to build a 2,000-item catalogue**. Against paying a person to type 2,000 items, that is not a
+close call.
+
+### ⚠️ What I could NOT verify
+
+**Whether Claude actually identifies real products correctly** — which is the entire question. It
+needs a key and real photos of real shelves in real shop lighting. Everything up to the API boundary
+is tested; the accuracy itself is Step 3 in the doc. Also unmeasured: real per-photo cost and latency
+(my $0.01–0.03 / 1–3s are estimates, not measurements).
+
+---
+
+## 8.3 — The three roles as ONE product ✅
+
+You asked me to audit customer, merchant and admin as one product, and specifically to **verify the
+role boundaries by attempting the attacks, not by reading the code**. So I did that literally:
+`backend/test/red-team.e2e-spec.ts` signs in as each role and **fires the malicious requests**.
+
+### Role boundaries — 56 attacks fired, 56 repelled, 0 succeeded
+
+Not "the code looks right" — actual requests, actual responses. Deliberately aimed at the **Phase 8
+endpoints too**, because new endpoints are where role checks get forgotten:
+
+| Attack | Result |
+|---|---|
+| Customer → merchant orders / products / uploads | **403** |
+| **Customer → the live order STREAM** (new) | **403** — an SSE endpoint leaks every order in real time; easy to forget |
+| **Customer → AI product entry** (new) | **403** — it costs money per call; an open one runs up your bill |
+| Customer / merchant → **admin escalation queue** (new) | **403** — it names other shops and their phone numbers |
+| **Merchant → approve their OWN shop** | **403** — the whole point of approval |
+| Merchant → suspend a competitor | **403** |
+| Merchant → another shop's product/order/delivery (exact id) | **404, never 403** — so ids cannot be probed |
+| Merchant → place an order / review | **403** |
+| Customer → another customer's order/cancel/review | **404** |
+| **Customer → register a device against a stranger's account** (new) | **400** — would deliver their order notifications to the attacker |
+| Merchant → smuggle `merchantId` into a product | **400** — rejected, not ignored |
+| Anonymous → 14 protected endpoints | **401 on every one** |
+| Forged JWT / JWT signed with the wrong secret | **401** |
+| **Use a token minted while an admin, after being demoted** | **403 immediately** — claims are re-read from the DB, not trusted |
+| Deleted account's token | **401 immediately** |
+
+### 🔴 A REAL security gap found — and it was the exact thing Phase 7 warned about
+
+**The merchant's "Call the customer" button was hidden outside CONFIRMED/PREPARING — but the API sent
+the phone number on every order regardless. Forever. Including delivered and cancelled ones.**
+
+Phase 7's own words about the customer's side of this rule:
+
+> *"Hiding a button while still shipping the number would be theatre."*
+
+That principle was enforced **in one direction only**. The customer→shop direction was gated on the
+server and tested six ways. The shop→customer direction — the *same mutual rule* — was **UI-only
+theatre**. Anyone who opened the browser network tab, or called the API directly, could harvest every
+customer's phone number from the shop's whole order history in **one request**.
+
+**Fixed**, using the *same* `SHOP_CONTACT_WINDOW` constant as the customer side, so the two directions
+cannot drift apart again — on the detail view **and** the list (gating only the detail would be
+pointless when the number is one list request away). Now pinned by red-team tests including a bulk
+harvest attempt. The admin still sees both numbers: **a deliberate, documented asymmetry** — their job
+is to arbitrate the argument afterwards, which needs both parties.
+
+### Consistency — one order, three views, 16 checks
+
+`backend/test/consistency.e2e-spec.ts` places a real order and reads it back through all three APIs at
+every stage of its life. If the three disagree, someone is looking at a lie, and the "my app says X /
+my screen says Y" conversation is unwinnable for everyone.
+
+All three agree on: **status at all 6 stages** (including that assigning a driver does *not* move the
+order to DELIVERING), total price to the exact fils, item count, each item's name/quantity/snapshotted
+price, **the order time compared as an instant** (a timezone difference would make one moment look
+like two), shop identity, driver name, out-of-stock item **by name**, the revised total *before*
+acceptance, and the cancellation reason **verbatim**.
+
+The one place they differ is now the deliberate one above — and there is a test **named for that
+asymmetry** explaining why, rather than a silent inconsistency.
+
+### Handoffs — 13 checks, all four verified
+
+| Handoff | Verified |
+|---|---|
+| **Shop marks item unavailable → customer decides** | Reaches the customer **named** ("1 item unavailable" is useless to someone deciding); shows the revised total **before** they choose; does **not** cancel the order; does **not** change what they pay until they accept; fires the notification event; and **only on acceptance** does the price move |
+| **Admin suspends shop → customer view updates** | Shop vanishes from the list; storefront returns **404 not 403** (existence stays hidden); new orders refused; **reverses cleanly**; and **the shopkeeper is told**, rather than silently unable to work |
+| **Shop cancels → customer learns why** | The shop's own words, verbatim, plus the notification event |
+| **Delivery progress → customer's screen** | Each step visible; driver's number appears exactly when they collect it; cancellation locks at the same moment |
+
+### 🐛 A production bug found by LOOKING at the screen, not by a test
+
+I screenshotted each role's main screen. The merchant's Orders tab showed **54 orders, unpaginated** —
+and the query had **no limit at all** (the admin's has `take: 200`).
+
+The shopkeeper's main working screen fetched **every order the shop had ever taken, with items
+joined** — and the tab **re-fetches it every 10 seconds**. A shop doing 50 orders/day would be
+re-downloading **~18,000 orders every 10 seconds** within a year, and the page would get slower every
+day it traded. **Every test passed**, because tests run against a small dataset.
+
+Fixed: `take: 200`, matching the admin. Nothing beyond that was reachable anyway — the dashboard has
+no pagination — and newest-first means today's orders are always there.
+
+### Usability fixes made along the way
+
+- **Admin escalation poll 60s → 20s.** The API was perfect; the *screen* took up to a minute to show
+  an escalated order. On the last line of defence for a missed order, that wasted 20% of the window.
+- **Photo field relabelled** "Photo (optional)" → **"Photo — we'll fill in the rest"**, so the feature
+  is discoverable at the moment it is useful.
+- **A low-confidence AI guess now looks different** from a confident one, so it cannot be skimmed past.
+- **Order heading falls back to the order id** when the phone is withheld, instead of "Order null".
+- **The list shows "—"** rather than a blank cell for a withheld number.
+
+### Verified by screenshot, not by tick
+
+I read the actual screens. The alert renders correctly with its escalation text; the AI entry screen
+shows "Ballpoint Pen (Blue) / 0.20 / Stationery" filled from one photo with "86% confident" and an
+honest "Demo mode: this is a canned example, not real recognition"; my phone gating is **visibly**
+working (a new PENDING order shows "—", CONFIRMED ones show the number).
+
+### A consequence worth knowing
+
+Because the contact window is CONFIRMED/PREPARING, **a shop cannot see the customer's number on a
+brand-new PENDING order** — it appears the moment they confirm. That follows the spec exactly, and
+confirming is the shop's first action anyway, so I judged it correct. Flagging it because it is a
+visible behaviour change: if you want the number visible before accepting, that is a one-line change
+to `SHOP_CONTACT_WINDOW`.
+
+---
+
+## 8.4 — Full test pass + sabotage verification ✅
+
+### Everything, green
+
+| Suite | Result |
+|---|---|
+| Database integrity | **18 / 18** |
+| API end-to-end | **346 / 346** (16 suites) |
+| Merchant dashboard + admin (real browser) | **33 / 33** |
+| Customer app (real browser, Pixel-7 viewport) | **32 / 32** |
+| Customer app (native-simulated, `jest-expo`) | **19 / 19** |
+| Approved-only rule (own script, flips shop status) | **2 / 2** |
+| **Total** | **450 passing, 0 failing** |
+
+`npm audit`: **0 vulnerabilities** in all three projects. `tsc --noEmit`: **clean** in all three.
+`expo-doctor`: **18/18**, SDK 54 pin intact.
+
+For scale: Phase 7 ended at 167 tests. Phase 8 adds **283**.
+
+### Beyond green ticks — I broke each rule and checked a test caught it
+
+A test that stays green while its rule is broken is worse than no test: it is a **false guarantee**.
+So each critical rule was deliberately broken, the suite re-run, and the rule restored.
+`backend/sabotage.sh` re-runs the whole thing.
+
+| Rule broken | Caught? |
+|---|---|
+| **Approved-shops-only** — removed the filter | ✅ tests failed |
+| **Price snapshot** — recalculated from current price | ✅ tests failed |
+| **Cancellation window** — allowed cancelling while DELIVERING | ✅ tests failed |
+| **Shop isolation** — removed merchant scoping from product queries | ✅ tests failed |
+| **Escalation** (new) — made an ignored order never escalate | ✅ tests failed |
+| **Customer phone gating** (the 8.3 finding) — leaked the number always | ✅ tests failed |
+| **Mandatory cancellation reason** | ✅ caught — see below |
+
+Plus, earlier in the phase: **the plaintext-token fallback** (8.1c), **the SSE stream** (8.1e — which
+proved the poll fallback *also* works), and **the alarm repeat** (8.1e).
+
+### 🪤 The most interesting result: my own sabotage lied to me, twice
+
+The mandatory-cancellation-reason check reported **"TESTS STILL PASSED — the rule is NOT protected"**.
+That looked like a serious hole. It was not — **it was my sabotage that was broken, not the tests.**
+
+That rule has **defence in depth**, in two independent layers:
+
+1. `dto.ts` — `@IsString` + `@Length(3, 500)`
+2. `merchant-orders.service.ts` — `if (trimmed.length === 0) throw`
+
+My first attempt removed only `@IsString`, leaving `@Length` still rejecting an empty reason. My
+second weakened only `@Length`, leaving the *service* still rejecting it. **Neither actually broke the
+rule**, so the tests were right to stay green.
+
+Breaking **both layers at once** — `@Length(0,500)` *and* `if (false)` on the service guard — made
+*"requires a reason — an empty or missing one is refused"* fail immediately. **The rule is protected.**
+
+I am recording this because it is the exact trap this whole exercise exists to catch, pointed the
+other way: **I nearly reported a false alarm as a real security hole.** A sabotage that doesn't
+actually break the rule proves nothing — the same way a test that passes for the wrong reason proves
+nothing. `sabotage.sh` now documents this rule as a manual two-file check rather than a misleading
+automated one, and the script reports **"SABOTAGE DID NOT APPLY"** rather than a false OK when its
+patch doesn't match.
+
+### 🔴 The most serious thing I found — and I only found it because I went looking again
+
+**The per-phone OTP limiter — the headline second half of blocker B2 — was completely untested at
+the HTTP level.** I deleted the `consumeOtpRequest` call from `AuthService` entirely, and **all 345
+tests still passed.** The feature could have been removed and nothing would have said a word.
+
+Two things conspired to hide it, which is why it needed a test of its own:
+
+1. `npm run test:e2e` raises the per-phone limit to 100000 so the suite does not throttle itself — so
+   it never trips in a normal run.
+2. Even unraised, the **per-IP** limit (3/min) trips long before the **per-phone** one (5/hour) on any
+   same-number burst — so no ordinary e2e test can *observe* the per-phone limit at all.
+
+My existing tests proved `PhoneRateLimiter` was *correct*, against real Redis — but never that
+anything *called it*. Correct and unreachable.
+
+**Now closed:** a test that disables the IP throttler and injects a small policy — the only
+arrangement where the per-phone limit is the thing being measured — fires 4 requests for one number
+and expects `[200, 200, 200, 429]`. **Sabotage-verified: the exact deletion that slipped past 345
+tests now fails immediately.** Suite: **346 passing**.
+
+This is the same lesson as the sabotage false alarm, pointed the other way: green ticks measured the
+wrong thing, and only deliberately breaking the code exposed it.
+
+### 📋 Logged, not fixed: escalation duplicates on multiple instances
+
+The escalation sweep runs in **every** instance and dedupes in an **in-memory** map. On N API
+instances, a customer would get N escalation pushes and the admin event would fire N times. **Nothing
+is lost or wrong** — the admin's queue is derived from order data, so it stays correct — but the
+notifications would be duplicated.
+
+Correct for the pilot, which runs one instance. **Before scaling out**, move `announced` into Redis
+(already a dependency) or elect a single sweeper. Noted in the code next to the same-shaped caveat on
+the in-process SSE stream. Flagging it because Redis was added *precisely because* B2 assumed multiple
+instances one day.
+
+### 🐛 Two more real problems found during the pass
+
+**1. The cleanup script had a hole — found because my own test fell in it.**
+`db:clean-test-data` only ever removed products belonging to a `[TEST] `-prefixed **shop**. My AI
+test adds a `[TEST] `-prefixed **product** to the *real* pilot shop (it has to — it drives the real
+dashboard against the real catalogue). That one row survived every cleanup, left the pilot with 21
+products, and failed two suites with *"expected 20, received 21"* — which reads like **a broken seed**
+rather than leftover test data. Exactly the kind of misdiagnosis that wastes an afternoon. Now
+cleaned, still refusing to touch anything that appears in a real order, and idempotent.
+
+**2. My own test polluted the shared pilot shop.** It saved a product and never removed it, so a later
+suite in the *same run* failed. It now cleans up **via the API** — the first attempt cleaned up
+through the UI, where the Delete button sits behind a native `confirm()` that Playwright
+auto-dismisses, so **the click did nothing and the cleanup silently failed while the test still
+passed**. The API call either works or throws.
+
+### Also fixed
+
+- **A label change broke an existing test** ("Photo (optional)" → "Photo — we'll fill in the rest").
+  The test was right to fail; the locator was updated, not the label reverted.
+- **Two production guards collided in the tests.** Adding the Redis guard broke the SMS and storage
+  "boots in production" tests, because each spec hand-rolled its own idea of a valid production
+  config. There is now **one** shared `productionEnv()` helper — so the next guard added updates one
+  place instead of silently breaking two suites.
+
+### ⚠️ What I could NOT verify — the honest list
+
+Everything below needs your hardware or your accounts. Nothing here is "probably fine":
+
+| Not verified | Needs |
+|---|---|
+| **A real SMS arriving on a Jordanian phone** | Paid Twilio account + the ~12-day Sender ID approval |
+| **A real photo upload to a real R2 bucket** | Cloudflare account with a card |
+| **A push notification landing on a closed phone** | Expo project (`eas init`) + a physical device |
+| **Whether Claude identifies real products correctly** | An API key + real photos of real shelves — this is the whole question for 8.2a |
+| **That the OS genuinely encrypts the token at rest** | A physical device; Keychain/Keystore is an OS guarantee |
+| **The redesigned/new mobile screens on a physical phone** | Your phone. Everything mobile is verified on Expo's **web** target at a Pixel-7 viewport — same components, same logic, not a real device |
+| **Real cost/latency** of SMS, AI vision, and R2 | Live accounts. My figures are estimates, and labelled as such |
+
+**The database is back to exactly the seed: 1 shop, 20 products, 0 test accounts.**
+
+---
+
+## Phase 8 — what to do next (in order)
+
+**1. ⏰ TODAY: start the Twilio Jordan Sender ID registration** (`docs/SMS_SETUP.md`, Steps 1–2).
+It takes **~12 working days** and **nothing else can shorten it**. Without an approved Sender ID, Zain
+and Orange do not deliver login codes *at all* — the app will look broken. This is the only item that
+can delay your launch, and it is 20 minutes of your time followed by waiting.
+
+**2. While that runs (~45 min total, no waiting):**
+- `docs/STORAGE_SETUP.md` — Cloudflare R2 bucket (~15 min)
+- `docs/REDIS_SETUP.md` — any free-tier Redis (~5 min)
+- `docs/PUSH_SETUP.md` — `eas init` + `PUSH_PROVIDER=expo`, then **confirm on your phone** (~20 min)
+- `docs/AI_VISION_SETUP.md` — optional, but it is the difference between a catalogue that gets
+  finished and one that gets abandoned (~5 min)
+
+**3. Expect the first production deploy to REFUSE TO START.** That is the guard working. It will name
+exactly what is missing and which doc fixes it. Three blockers that used to fail *silently* now fail
+*loudly*.
+
+**4. The one thing only you can do: walk the app on your phone.** Everything mobile is verified on
+Expo's web target at a phone-sized viewport — same components, same logic, but not a real device.
+Specifically unproven: push arriving on a closed phone, and the redesigned screens on real hardware.
+
+### Decisions I made alone, that you may want to overrule
+
+| Decision | Why | How to change it |
+|---|---|---|
+| **Twilio** for SMS | Self-serve signup you can finish today; regional aggregators are sales-led and cheaper at volume | One new class in `src/sms/` |
+| **Cloudflare R2** for photos | No egress fees; photos are read constantly | `S3_ENDPOINT` — the code is S3-generic |
+| **`claude-opus-4-8`** for AI vision | Accuracy. But recognition is not a hard reasoning task — **try `claude-sonnet-5` to cut cost** | `VISION_MODEL` env var |
+| **Escalation: 2 min → nudge shop, 5 min → tell admin** | A guess. You know Jordanian shop rhythms; I do not | `ESCALATION_*_SECONDS` env vars |
+| **Per-phone OTP limit: 5/hour** | Generous for a real person, useless for abuse | `RATE_LIMIT_OTP_PER_PHONE_PER_HOUR` |
+| **Rate limiter fails OPEN if Redis dies** | A total login outage is worse than a briefly unenforced cap | `phone-rate-limiter.ts` |
+| **A shop cannot see the customer's number until they confirm** | Follows your contact-window spec exactly | `SHOP_CONTACT_WINDOW` in `order-policy.ts` |

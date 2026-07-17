@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+coverage/
+.expo/
+.DS_Store
+Thumbs.db
+
+# Prisma client is generated from schema.prisma — never commit it.
+backend/generated/
+
+# Uploaded product photos are local-dev artifacts, not source.
+backend/uploads/
+
+# Playwright output.
+merchant-dashboard/test-results/
+merchant-dashboard/playwright-report/
+merchant-dashboard/e2e/screenshots/
+mobile/test-results/
+mobile/playwright-report/
+mobile/e2e/screenshots/

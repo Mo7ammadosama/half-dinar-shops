@@ -1,0 +1,46 @@
+# Local development database for the Half-Dinar Shops marketplace.
+# Start with: docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: halfdinar-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: halfdinar
+      POSTGRES_PASSWORD: halfdinar_local_dev
+      POSTGRES_DB: halfdinar
+    ports:
+      # Host port 5433 avoids clashing with any pre-existing local PostgreSQL on 5432.
+      - "5433:5432"
+    volumes:
+      - halfdinar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Prisma migrations must not run before the server is genuinely accepting connections.
+      test: ["CMD-SHELL", "pg_isready -U halfdinar -d halfdinar"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    # Backs rate limiting. In-memory limits reset on every restart and are not
+    # shared between instances, so the OTP/SMS abuse protection could be
+    # bypassed simply by waiting for a redeploy or hitting a second instance
+    # (launch blocker B2).
+    image: redis:7-alpine
+    container_name: halfdinar-redis
+    restart: unless-stopped
+    ports:
+      # Host port 6380 avoids clashing with any pre-existing local Redis on 6379.
+      - "6380:6379"
+    # Rate-limit counters are short-lived and rebuildable, so persistence is off:
+    # an empty Redis after a restart costs at most one extra window of budget,
+    # and appendonly writes would be pure overhead.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  halfdinar_pgdata:

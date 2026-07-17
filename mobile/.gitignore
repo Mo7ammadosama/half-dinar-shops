@@ -1,0 +1,47 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+# `.env` itself was missing here — the Expo template only ignores `.env*.local`,
+# so a plain mobile/.env would have been committed. Nothing sensitive lives in
+# the mobile app today (the API base is derived from the Expo host at runtime),
+# but EXPO_PUBLIC_* values are baked into the bundle and a stray .env is exactly
+# how a key ends up in a repo.
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
