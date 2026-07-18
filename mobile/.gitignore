@@ -45,3 +45,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Local tunnel cache (cloudflared binary + logs) — never commit
+.tunnel/

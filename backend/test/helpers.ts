@@ -1,9 +1,11 @@
 import { INestApplication } from "@nestjs/common";
-import { Test } from "@nestjs/testing";
+import { Test, TestingModuleBuilder } from "@nestjs/testing";
 import { ThrottlerGuard } from "@nestjs/throttler";
 import { AppModule } from "../src/app.module";
 import { configureApp } from "../src/app.setup";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { MockVisionAnalyzer } from "../src/vision/mock-vision.analyzer";
+import { VISION_ANALYZER } from "../src/vision/vision.types";
 
 /**
  * Boots the real application for e2e tests.
@@ -12,9 +14,17 @@ import { PrismaService } from "../src/prisma/prisma.service";
  * a test suite firing dozens of requests from one IP is not throttled. Rate
  * limiting itself is covered separately by throttle.e2e-spec.ts, which boots the
  * app with the guard intact.
+ *
+ * `configure` gives a suite a hook onto the module builder to override a
+ * provider for that suite alone — e.g. to pin the mock vision analyzer so the
+ * endpoint's contract is tested deterministically no matter what real API keys
+ * happen to sit in the developer's .env (a live ANTHROPIC_API_KEY otherwise
+ * flips the seam to the real Claude analyzer and the endpoint tests hit the
+ * network — see forceMockVision below).
  */
 export async function createTestApp(
   withThrottling = false,
+  configure?: (builder: TestingModuleBuilder) => void,
 ): Promise<{ app: INestApplication; prisma: PrismaService }> {
   const builder = Test.createTestingModule({ imports: [AppModule] });
 
@@ -25,11 +35,26 @@ export async function createTestApp(
     builder.overrideProvider(ThrottlerGuard).useValue({ canActivate: () => true });
   }
 
+  configure?.(builder);
+
   const moduleRef = await builder.compile();
   const app = configureApp(moduleRef.createNestApplication());
   await app.init();
 
   return { app, prisma: app.get(PrismaService) };
+}
+
+/**
+ * Pins the AI product-entry seam to the deterministic mock analyzer.
+ *
+ * Pass to createTestApp's `configure` hook. Without it, a real ANTHROPIC_API_KEY
+ * in .env makes the endpoint call live Claude — non-deterministic, network-bound,
+ * and (offline or on a refusal) a 503 that fails the contract tests for a reason
+ * that has nothing to do with the endpoint. The live path is deliberately not
+ * covered here; the analyzer unit tests mock the SDK instead.
+ */
+export function forceMockVision(builder: TestingModuleBuilder): void {
+  builder.overrideProvider(VISION_ANALYZER).useValue(new MockVisionAnalyzer());
 }
 
 /**

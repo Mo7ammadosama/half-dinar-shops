@@ -5,7 +5,7 @@ import { MockVisionAnalyzer } from "../src/vision/mock-vision.analyzer";
 import { ClaudeVisionAnalyzer } from "../src/vision/claude-vision.analyzer";
 import { createVisionAnalyzer } from "../src/vision/vision.module";
 import { VisionError } from "../src/vision/vision.types";
-import { createTestApp, REAL_PNG, uniquePhone } from "./helpers";
+import { createTestApp, forceMockVision, REAL_PNG, uniquePhone } from "./helpers";
 
 /**
  * AI product entry from a photograph (8.2a).
@@ -225,7 +225,11 @@ describe("AI product entry (8.2a)", () => {
     let merchantToken: string;
 
     beforeAll(async () => {
-      ({ app } = await createTestApp());
+      // Pin the mock analyzer: this block tests the ENDPOINT's contract (a
+      // suggestion is returned, nothing is saved, non-images are rejected), not
+      // live Claude. A real ANTHROPIC_API_KEY in .env would otherwise route
+      // these to the network and return 503 offline.
+      ({ app } = await createTestApp(false, forceMockVision));
       http = request(app.getHttpServer());
 
       const phone = "0791234567"; // the seeded pilot merchant

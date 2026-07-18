@@ -214,6 +214,37 @@ test.describe("Customer app", () => {
     await expect(page.getByTestId("product-item")).toHaveCount(20);
   });
 
+  test("a failed shop load shows an error with Retry, and recovers when the network returns", async ({
+    page,
+  }) => {
+    // Only the shops-list endpoint fails — auth must still work so we can sign
+    // in and reach the screen that does the failing fetch.
+    const shopsList = /\/api\/shops(\?.*)?$/;
+    await page.route(shopsList, (route) => route.abort());
+
+    await page.goto("/");
+    await page.getByTestId("phone-input").fill(SEEDED_CUSTOMER);
+    await page.getByTestId("send-code").click();
+    await expect(page.getByTestId("code-input")).toHaveValue(/^\d{6}$/, { timeout: 15_000 });
+    await page.getByTestId("verify-code").click();
+
+    // A network failure is surfaced as a friendly banner, NOT a crash or a
+    // blank screen — and the app offers a way out.
+    await expect(page.getByTestId("shops-error")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("shops-error")).toContainText(/Retry/);
+    // It did not silently pretend to succeed.
+    await expect(page.getByTestId("shop-card")).toHaveCount(0);
+
+    // Network returns; the customer taps Retry and the shops load.
+    await page.unroute(shopsList);
+    await page.getByText("Retry").click();
+
+    await expect(
+      page.getByTestId("shop-card").filter({ hasText: "Al-Nus Dinar Shop" }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("shops-error")).toHaveCount(0);
+  });
+
   test("the session survives a reload, and signing out ends it", async ({ page }) => {
     await signIn(page, SEEDED_CUSTOMER);
 

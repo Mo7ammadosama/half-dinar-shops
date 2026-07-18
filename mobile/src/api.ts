@@ -15,9 +15,17 @@ import Constants from "expo-constants";
  * host is borrowed from there and the API port substituted.
  */
 function resolveApiBase(): string {
+  // 1. Explicit build-time override.
   const configured = process.env.EXPO_PUBLIC_API_BASE;
   if (configured) return configured;
 
+  // 2. Runtime injection from the manifest's `extra` (set by app.config.js when
+  //    running via `npm run start:remote`). This is how the app points at a
+  //    tunneled backend that works from any network — no bundle rebuild needed.
+  const fromExtra = (Constants.expoConfig?.extra as { apiBase?: string } | undefined)?.apiBase;
+  if (fromExtra) return fromExtra;
+
+  // 3. LAN / hotspot: the API sits on the same host as Metro, on port 3000.
   const hostUri = Constants.expoConfig?.hostUri;
   const host = hostUri?.split(":")[0];
   if (host) return `http://${host}:3000/api`;

@@ -1599,3 +1599,400 @@ Specifically unproven: push arriving on a closed phone, and the redesigned scree
 | **Per-phone OTP limit: 5/hour** | Generous for a real person, useless for abuse | `RATE_LIMIT_OTP_PER_PHONE_PER_HOUR` |
 | **Rate limiter fails OPEN if Redis dies** | A total login outage is worse than a briefly unenforced cap | `phone-rate-limiter.ts` |
 | **A shop cannot see the customer's number until they confirm** | Follows your contact-window spec exactly | `SHOP_CONTACT_WINDOW` in `order-policy.ts` |
+
+---
+
+# Phase 9 — Autonomous pass (connectivity, exhaustive testing, attacks) — 2026-07-17
+
+Founder away with instructions to work autonomously, never wait, pick reasonable defaults, log
+everything continuously, and fix anything found. Three parts: (1) mobile connectivity, (2) exhaustive
+testing across all three roles, (3) attack everything and fix what breaks. This section is appended
+live as work proceeds.
+
+## 9.0 — Baseline first (before changing anything): a real defect the reports hid
+
+Before touching a line, I re-ran the suites to confirm the claimed "450 passing" was true **right
+now**. It was not — **2 backend e2e tests failed** (`vision.e2e-spec.ts`).
+
+**Root cause — a genuine test-design defect, not a flake.** Since Phase 8 the founder pasted a real
+`ANTHROPIC_API_KEY` into `backend/.env` (the optional AI-vision setup). The vision seam auto-detects a
+key and switches from the mock analyzer to **live Claude** — exactly as designed. But the vision
+**endpoint** tests asserted `provider === "mock"` and expected `201`, without forcing the mock. So with
+a key present they hit the real Claude API and got **503** (no network egress here). The suite was
+**green with no key and red with one** — coupled to ambient env, the precise "passes/fails for the
+wrong reason" trap this project cares about.
+
+**Fix.** `createTestApp` gained an optional builder-configurator, and a `forceMockVision` helper
+(`test/helpers.ts`) pins the deterministic mock for the endpoint block regardless of what keys sit in
+`.env`. Live Claude accuracy stays deliberately untested (it needs real photos — the file's own
+header says so); the analyzer's unit tests already mock the SDK. **Verified under the exact failing
+condition** (key present): vision suite **20/20**, full backend e2e back to **346/346**, db **18/18**.
+
+> ⚠️ **Same trap still lurks in the browser suites.** The dashboard's AI-entry Playwright test asserts
+> the on-screen "Demo mode" banner, which only shows for the mock. If you run the API with the real
+> `ANTHROPIC_API_KEY` while running `merchant-dashboard` `npm run test:e2e`, that browser test will
+> fail for the same reason. Run browser AI tests with `VISION_PROVIDER=mock` (or the key removed).
+> Noted so it is not mistaken for broken code.
+
+## 9.1 — Part 1: mobile connectivity (diagnosed PC-side; documented for you)
+
+Full write-up: **`docs/MOBILE_CONNECTIVITY.md`**. Summary of what I did and found:
+
+**Diagnosis (verified from the PC).** Metro binds `0.0.0.0:8081` and the API `0.0.0.0:3000`; the
+firewall rules are already in place. The phone reaches the PC on **hotspot** but not on **home Wi-Fi**,
+and Metro shows zero activity — the packets never arrive. That is **AP Isolation** (a.k.a. Client /
+Wireless / Station Isolation, or a Guest SSID): the router lets each device reach the internet but
+blocks device-to-device traffic. Hotspots don't isolate, which is exactly why the hotspot works.
+
+**The router setting to check when you're back (named precisely):** **AP Isolation** — under
+**Wireless → Advanced** on most ISP routers (Orange/Zain/Umniah in Jordan ship it **on** by default).
+Set it **OFF**, and plain `npx expo start` works on home Wi-Fi. This is a change on **your** router,
+which I cannot reach; documented for you.
+
+**Why I did NOT make `--tunnel` the default (this is the important decision):**
+
+1. **Tunnel breaks every API call.** `expo start --tunnel` tunnels only Metro (8081), not the API
+   (3000). But `mobile/src/api.ts` derives the API host from Metro's `hostUri` and assumes the API is
+   on the same host at `:3000`. In tunnel mode that becomes `http://<ngrok-domain>:3000/api` — a host
+   serving nothing on 3000, cleartext to an HTTPS-only domain (iOS ATS rejects it too). The app would
+   load then fail on login — a worse, **unverifiable** regression (no device here to catch it). Same
+   silent-URL bug class this project keeps hitting.
+2. **Tunnel would not even connect here** (secondary, cause undiagnosed). `expo start --tunnel` was
+   attempted **twice**; both times ngrok failed with `ngrok tunnel took too long to connect`. The most
+   likely cause is a **missing ngrok authtoken** (modern ngrok fails exactly this way without one —
+   which is why the two-tunnel recipe below tells the founder to add one), not proven blocked egress. I
+   am not presenting this as independent evidence; reason #1 (the API-routing break) is decisive on its
+   own.
+
+**What I actually shipped for Part 1:**
+- Added an explicit **`start:tunnel`** script to `mobile/package.json` (did **not** repoint the working
+  default `start`).
+- Wrote `docs/MOBILE_CONNECTIVITY.md`: the diagnosis, the exact router setting, the **hotspot** path
+  (already proven, needs no router change — the recommended workaround), and the **full two-tunnel
+  recipe** (a second ngrok on 3000 + `EXPO_PUBLIC_API_BASE`) for the determined case, with its
+  free-tier caveats.
+
+**Decision I made alone:** default `start` stays LAN (not tunnel), because tunnel is both broken here
+and would ship a silent API-routing regression. The most reliable no-router-change path is the
+**hotspot you already use**. Overrule by turning off AP Isolation (permanent fix) — documented.
+
+## 9.2 — Part 3: attacking the surface the red-team suite did not cover
+
+`red-team.e2e-spec.ts` already fires 56 cross-role / privilege-escalation attacks. Rather than re-fire
+those (proves nothing new), I mapped the brief's explicit list against existing coverage and attacked
+the **gaps**, in a new suite: **`backend/test/attack-surface.e2e-spec.ts` (22 tests)**. Every test
+asserts the *secure* outcome, so a failure = an attack succeeds.
+
+**What I fired, and the result — all repelled (22/22):**
+
+| Attack class | Fired | Result |
+|---|---|---|
+| **Numeric overflow / non-finite** — product price `1e308`, `"Infinity"`, `"NaN"`, `1500` (>1000 cap), `0.001` (>2 dp), `-0.01` | 7 | **400** each; **no `[ATK]` row left behind** (asserted) |
+| **Order numeric abuse** — quantity `100` (>99), `1.5`, `"Infinity"`; `51`-line order (>50 cap) | 4 | **400** each |
+| **Oversized upload (DoS)** — 8 MB file to the image upload **and** the AI-vision endpoint | 2 | **4xx** each (multer `LIMIT_FILE_SIZE`; the vision route shares the same guard, not a weaker copy) |
+| **OTP replay / supersession / expiry** — verify a stale code after a newer one is issued; verify an expired code on the first try | 2 | **401** each |
+| **Invalid state transitions, direct to the API (bypassing the UI)** — confirm an already-confirmed order; confirm a **delivered** order; start-preparing a pending (skip confirm); assign a driver before PREPARING; accept out-of-stock removals when there are none; review before delivery | 6 | **409** each |
+| **Injection patterns** — 4 SQL-ish `?search=` payloads (`' OR '1'='1`, `'; DROP TABLE products;--`, …); a `<script>` product name | 2 | **200** + table intact (Prisma parameterizes); the script name **round-trips verbatim as inert text**, never executed |
+| **Rate-limit bypass** — exceed the OTP-request cap (3/min) while **rotating `X-Forwarded-For`** every request | 1 (in `throttle.e2e-spec`) | **`200,200,200,429,429`** — the spoofed header buys **no** fresh budget |
+
+> **Two attack classes the brief named that I initially dropped, then fired (flagged by the advisor).**
+> Injection and rate-limit-bypass were missing from the first attack pass. Injection is low-risk to
+> reason about (Prisma is parameterized, both clients are React), but I fired it rather than argue it.
+> **Rate-limit-bypass was the one that could have been a real hole**, and it hinged on one config fact:
+> the app does **not** enable Express `trust proxy`, so `X-Forwarded-For` is ignored and the throttler
+> keys on the real socket IP — the header cannot mint budget. **Sabotage-verified:** turning `trust
+> proxy` on (the realistic misconfiguration) made the rotating-XFF test **fail immediately** (the
+> spoofed requests came back `200` instead of `429`), proving both the risk and that the test catches
+> it. Reverted; `git diff` on `app.setup.ts` is empty. *Honest blast radius if it were ever
+> misconfigured:* the **per-phone** OTP cap (keyed on the phone, not the IP) still backstops SMS-spend,
+> but registration and the default bucket have no such backstop — so keep `trust proxy` off unless the
+> throttler tracker is explicitly pinned.
+
+**No new vulnerability found** — the DTO bounds (`@IsInt @Min(1) @Max(99)`, `@IsNumber({maxDecimalPlaces:2}) @Min(0) @Max(1000)`, array-size caps), the multer size limit, the OTP
+invalidate-on-reissue + newest-only + expiry logic, and the `canMoveTo`/policy guards on every order
+transition all hold when hit directly. This is verification, not a fix — but the **25 new tests**
+(24 in `attack-surface.e2e-spec.ts` + 1 rotating-XFF in `throttle.e2e-spec.ts`) now **lock** these so a
+future change that weakens any of them fails loudly.
+
+### 🪤 A sabotage that lied — the 8.4 lesson, again, pointed the other way
+
+I sabotage-verified the most security-relevant new test ("an earlier OTP code is invalidated once a
+newer one is requested") by disabling the `updateMany` invalidation in `auth.service`. **The test
+still passed** — which *looked* like the test was toothless. It was not: OTP supersession has
+**defence in depth**. `verifyOtp` only ever checks the **newest** unconsumed code
+(`orderBy: createdAt desc`), so a stale code fails to match *regardless* of the invalidation. Breaking
+**one** layer leaves the other enforcing the rule — exactly the mandatory-cancellation-reason false
+alarm from 8.4, pointed the other way. Breaking **both** (invalidation off **and** `orderBy` flipped
+to `asc`) made the test **fail immediately**, proving it genuinely catches an OTP-replay hole. Both
+sabotages reverted; `git diff` on `auth.service.ts` is empty. The test is real; the property is just
+protected twice.
+
+### Observation logged, not fixed: a benign check-then-act race
+
+Customer `cancel` and merchant `confirm`/`start-preparing` read the order status and then update it in
+two separate statements (not one atomic guarded update). Under exact concurrency a cancel could commit
+against a status that changed a millisecond earlier (TOCTOU). **Low severity for the single-instance
+pilot** (one shop, human-paced actions, cash-on-delivery so no money moves), and the `create` and
+`acceptChanges` paths that touch money **are** transactional. Noted here rather than silently changing
+behaviour; the fix (a conditional `updateMany ... where status IN (...)`) is a clean follow-up if the
+pilot ever runs hot or multi-instance.
+
+## 9.3 — Part 2: exhaustive testing across all three roles, run and verified
+
+The brief asked to test every interactive element and every screen state across customer, merchant and
+admin. The three browser suites already encode that surface (register/sign-in, product CRUD, stock
+toggle, photo upload, search, validation-error surfacing, the full new-order alert system, AI product
+entry, admin escalation queue; and on mobile: sign-up, browse, filters, search + empty state, location
+fallbacks, session persistence, the full order lifecycle, cancellation windows, delivery status walk,
+basket ops, exact totals, nearest-shop sort). So Part 2 was **run them all for real, right now**, plus
+fill the one state they missed.
+
+**Result — all green, verified live against a running API + real browsers:**
+
+| Suite | Result |
+|---|---|
+| **Merchant dashboard + admin** (Playwright, real browser) | **33 / 33** |
+| **Customer app** (Playwright, Expo web, Pixel-7 viewport) | **33 / 33** (32 + the new one below) |
+| **Approved-only rule** (own script, flips shop status) | **1 / 1 PASS** |
+| Backend DB integrity | **18 / 18** |
+| Backend API e2e (incl. the 22 new attacks) | **368 / 368** |
+| Mobile native-simulated (`jest-expo`) | **19 / 19** |
+
+> **A setup mistake I made, caught and fixed by running it — not a product bug.** My first dashboard
+> run showed **2 failures** in `admin-escalation.spec`. Cause: I started the browser-test API without
+> the short escalation windows that spec needs (`ESCALATION_FIRST_ALERT_SECONDS=2
+> ESCALATION_ADMIN_ALERT_SECONDS=4`), so with the default 2-min/5-min windows the order never
+> escalated inside the test's few-second wait. Restarted the API with those env vars and re-ran: **3 /
+> 3 green.** The third escalation test passed even the first time because it asserts an order that gets
+> confirmed *never* escalates — true regardless of the window length. Recorded because it is exactly
+> the "verify the harness, not just the app" trap; the API must be booted with those vars for that spec.
+>
+> Also: the browser-test API must run with `VISION_PROVIDER=mock`, or the dashboard AI-entry test (which
+> asserts the on-screen "Demo mode" banner) fails against a real `ANTHROPIC_API_KEY` — the browser-side
+> twin of the 9.0 backend fix.
+
+### The gap I filled — failed-network recovery (a state the brief named, and nothing tested)
+
+`ShopsScreen` has a real failure path: on a network error it shows a `shops-error` banner with a
+**Retry** button. Nothing exercised it. Added
+`mobile/e2e/customer.spec.ts › "a failed shop load shows an error with Retry, and recovers when the
+network returns"`: it signs in with the shops-list endpoint **blocked** (Playwright route abort),
+asserts the friendly error banner appears (not a crash, not a blank screen, not a silent success),
+then **unblocks the network, taps Retry, and asserts the shops load** and the banner clears.
+
+**Sabotage-verified.** I made `load()` swallow the error instead of surfacing it; the test **failed
+immediately** at the `shops-error` assertion (`element(s) not found`). Reverted (`git diff` on
+`ShopsScreen.tsx` is empty); the test passes again. So it genuinely catches a swallowed-failure
+regression, not a vacuous pass.
+
+### Cleanup + end state
+
+Ran `db:clean-test-data` afterwards — it removed 87 test accounts and their shops/orders, the demo
+shops, and a leftover `[TEST] Lifecycle Shop`. **But a direct row count then proved that was NOT
+"exactly the seed"** — a correction the advisor prompted, and it was right: the DB still held **95
+users and 1 order** (seed is 3 users / 0 orders). `db:clean-test-data` only targets the `+962780000`
+customer range and `[TEST]` shops, so it does **not** catch the **stub user rows** every OTP request
+creates (the backend e2e suites use `+96279…` phones) nor a stray `PREPARING` order left by a
+consistency spec. Shops/products/reviews *were* clean (1 merchant, 20 products, 0 reviews); the 18
+DB-integrity tests passed anyway because since Phase 7 they are deliberately scoped to the pilot and no
+longer assert an empty world — so they cannot be used to claim "0 orders".
+
+I then surgically restored the true seed on this dev DB (deleted all orders/reviews and every user
+outside the 3 seeded phones), and re-counted: **orders 0, users 3, merchants 1, products 20.** Now
+genuinely at the seed. Re-run `npm run seed:demo` to restore the demo shops.
+
+> **Follow-up worth doing:** `db:clean-test-data` should also sweep unverified stub users older than a
+> cutoff (or the e2e helpers should clean their own `+96279…` users), or every test run slowly
+> accretes stub rows. Logged, not done — it needs a careful marker so it can never touch a real
+> customer.
+
+> **Verification limit unchanged from Phase 3:** the mobile side is Expo's **web** target at a Pixel-7
+> viewport — same components and logic, not native hardware. Nothing here changes that; see the Phase 3
+> testing-limitation note.
+
+## 9.4 — Phase 9 summary: what changed, what to know
+
+**Files changed (all inside the project; no system/router changes made):**
+- `backend/test/helpers.ts` — added a builder-configurator hook + `forceMockVision` (9.0 fix).
+- `backend/test/vision.e2e-spec.ts` — endpoint block now pins the mock (9.0 fix).
+- `backend/test/attack-surface.e2e-spec.ts` — **new**, 24 attacks (9.2).
+- `backend/test/throttle.e2e-spec.ts` — added the rotating-XFF rate-limit-bypass test (9.2).
+- `mobile/e2e/customer.spec.ts` — **new** failed-network-recovery test (9.3).
+- `mobile/package.json` — added `start:tunnel` script (9.1); default `start` untouched.
+- `docs/MOBILE_CONNECTIVITY.md` — **new**, the full connectivity write-up (9.1).
+
+**No production source code was changed** — only tests, docs, and one npm script. Every backend `src/`
+edit was a temporary sabotage, each reverted (verified: `git diff` on `auth.service.ts` and
+`ShopsScreen.tsx` is empty).
+
+**The three things the founder should know:**
+1. **Connectivity:** turn off **AP Isolation** on the home router (Wireless → Advanced) for the phone to
+   reach the PC on home Wi-Fi; until then the **hotspot** works. `--tunnel` is deliberately *not* the
+   default (it breaks API routing and would not connect here). Full detail: `docs/MOBILE_CONNECTIVITY.md`.
+2. **A real test defect was found and fixed:** the vision tests broke the moment a real `ANTHROPIC_API_KEY`
+   was added, because they were coupled to ambient env. Fixed to pin the mock. Same trap still lurks in
+   the *browser* AI test — run browser suites with `VISION_PROVIDER=mock`.
+3. **The attack surface holds:** 25 new attacks (numeric overflow/non-finite/over-cap, oversized
+   payloads, OTP replay/supersession/expiry, invalid state transitions direct-to-API, injection
+   patterns, and a rotating-`X-Forwarded-For` rate-limit-bypass) were all repelled; no new
+   vulnerability. One low-severity TOCTOU race is logged as a scale-out follow-up, not fixed.
+
+## 9.5 — Network-agnostic phone access: `npm run start:remote` (2026-07-18)
+
+The founder asked for a way to run the app on their phone that works from **any**
+network, every time, with no router or hotspot changes — explicitly rejecting the
+AP-isolation path. The core problem they named is real: `expo start --tunnel`
+tunnels only the Metro bundler, not the API on :3000, so the app loads but every
+API call fails.
+
+**Built:** a one-command workflow, `npm run start:remote` (`mobile/scripts/start-remote.sh`),
+that tunnels BOTH halves and wires them together automatically:
+
+1. Ensures the backend is up on :3000 (starts it if not).
+2. Opens a public tunnel to the **API** with **cloudflared** — no account, binary
+   auto-downloaded once to `mobile/.tunnel/` (git-ignored).
+3. Injects that tunnel URL into the app **at runtime** via a new dynamic
+   `mobile/app.config.js`, which puts it in the Expo manifest's `extra.apiBase`.
+   `src/api.ts` now reads `Constants.expoConfig.extra.apiBase` first. **No bundle
+   rebuild, no `--clear`** — the URL rides in the manifest, regenerated per
+   request, so it can never go stale.
+4. Starts `expo start --tunnel` for the bundle, with an **auto-retry loop**.
+
+### Why cloudflared for the API + Expo's ngrok for Metro (not one tool for both)
+
+Expo's `--tunnel` correctly does the hard part for Metro — HTTPS/443 manifest and
+bundle-URL rewriting that nothing else replicates. It's ngrok-based; a second
+ngrok agent would hit the free-tier single-session limit. **cloudflared is a
+different provider**, so the two coexist with zero conflict, and cloudflared quick
+tunnels need **no account** — the most "just works" option available.
+
+### Two real bugs found and fixed by testing it (not by reasoning)
+
+1. **Stale baked URL.** The first version injected the URL via `EXPO_PUBLIC_API_BASE`,
+   which is inlined into the JS bundle at build time. Because the tunnel URL changes
+   every run, a cached bundle would carry a PREVIOUS run's (now-dead) URL and every
+   API call would silently fail. `--clear` fixes it but forces a slow cold rebuild
+   that *worsens* the ngrok tunnel race (a run failed exactly this way). **Reworked
+   to runtime injection via the manifest `extra`** — no build-time bake, no cache
+   clear, correct every run.
+2. **The Expo/ngrok tunnel is genuinely flaky** — it failed with "ngrok tunnel took
+   too long to connect" on ~3 of ~8 attempts. Not our bug, but it breaks "every
+   time." **Added an auto-retry loop** (up to 4×) that tells a startup failure apart
+   from an intentional Ctrl+C by elapsed uptime (a real session lasts minutes; a
+   tunnel failure dies within ~60s), so it keeps full Metro interactivity.
+
+### Proven from the PC (2026-07-18)
+
+- **API reachable over the public internet:** `GET https://<random>.trycloudflare.com/api/shops`
+  → **HTTP 401**, and `POST /auth/otp/request` over the public URL returned a real
+  `devCode`. (This also demonstrates the security note below, first-hand.)
+- **App auto-points at the tunnel:** the Expo manifest served to the phone carries
+  `extra.expoClient.extra.apiBase = https://<random>.trycloudflare.com/api` — exactly
+  what `Constants.expoConfig.extra.apiBase` resolves to at runtime. No manual editing.
+- **Regression-clean:** mobile `tsc` clean; the dynamic config adds `extra.apiBase`
+  only when the env var is set (verified via `expo config`), so normal `expo start`
+  is unchanged; full mobile jest **19/19** (native-smoke's known intermittent
+  ScrollView flake appeared once, then passed 3× in a row — pre-existing, not from
+  this change).
+
+### 🔒 Security (documented in the doc, flagged by the advisor)
+
+While `start:remote` runs, the dev backend is on a public URL, and since the API
+returns login codes in its response (no SMS yet), anyone with the live URL could
+request and read a code for any test number — **including admin `0799999999`**. The
+URL is random and dies on Ctrl+C, so practical risk is low; the doc says plainly to
+**only run it while testing and stop it when done**, and notes **Tailscale** as the
+private alternative (no public exposure; `api.ts` works unchanged) for anyone who
+wants it.
+
+### What could NOT be tested without the device
+
+The phone physically rendering the screens and making calls end-to-end. Everything
+up to that — both tunnels, the public API round-trip, and the runtime URL injection
+— is verified. `docs/MOBILE_CONNECTIVITY.md` is rewritten with this as the
+**primary** method, above LAN/hotspot.
+
+**Files:** `mobile/scripts/start-remote.sh` (new), `mobile/app.config.js` (new),
+`mobile/src/api.ts` (runtime `extra.apiBase`), `mobile/package.json`
+(`start:remote`), `mobile/.gitignore` (`.tunnel/`), `docs/MOBILE_CONNECTIVITY.md`
+(rewritten).
+
+### 9.5a — Fix: `start:remote` health check misread a running backend (2026-07-18)
+
+**Reported:** `start:remote` failed with *"the backend did not come up on :3000"* even though the
+backend was genuinely running (founder confirmed via netstat + live API logs). So the **health check**,
+not the backend, was wrong.
+
+**Root cause:** the check demanded the endpoint return **exactly `401`**
+(`[ "$(api_status)" = "401" ]` against `http://localhost:3000/api/shops`, `--max-time 2`). That's
+brittle — a perfectly healthy backend answers with a *different* status in several ordinary cases, and
+every one was misread as "down":
+- **`429`** once the default rate limit is hit (the script itself polls up to 61×; repeated failed runs
+  accumulate, and the limit persists in Redis) — a live server, read as dead.
+- a **2-second timeout** on a loaded machine, or against the backend the script had *just* spawned.
+- **`localhost`** resolving to IPv6 `::1` first on Windows and stalling.
+
+**Fix:** the check now asks the right question — *"did a server answer with ANY HTTP status?"* — not
+*"did it answer 401?"*. `api_is_up()` treats any non-`000` response as up; the poll uses **`127.0.0.1`**
+(no IPv6 detour), a **6s** timeout + **3s** connect-timeout, and the redundant `|| echo "000"` (which
+produced `"000000"`) is gone. The "already running" line now prints the status it saw.
+
+**Tested both branches end-to-end (2026-07-18):**
+- **Backend already up** → *"Backend already running on :3000 (HTTP 401) — using it"* → API tunnel →
+  public `GET /api/shops` = **401**. (The exact scenario the founder hit — now passes.)
+- **Backend down** → *"Starting the backend… Backend is up."* → tunnel → ready.
+
+**Honest limit:** the old check *did* work on this machine when the backend was up (localhost→401 in
+5 ms), so I could not reproduce the founder's exact failure here — but the new check is robust to all
+of the causes above, which is what matters. Files: `mobile/scripts/start-remote.sh`.
+
+### 9.5b — The REAL fix: `start:remote` ran under WSL, not Windows (2026-07-18)
+
+9.5a fixed a brittle status-code check, but the founder reported the **same** error
+after it. Diagnosed live this time instead of assuming — and the status code was
+never the cause.
+
+**Root cause (proven on this machine):** `package.json` had
+`"start:remote": "bash scripts/start-remote.sh"`. `npm` runs scripts through
+`cmd.exe`, and on a Windows box with WSL installed the bare command **`bash`
+resolves to `C:\Windows\System32\bash.exe` — WSL**, not Git Bash. A script run
+under **WSL2 lives in a separate network namespace**, so its `127.0.0.1:3000` is
+*not* the Windows-side backend. The health check could never see a perfectly
+healthy backend. Demonstrated directly, same backend, same instant:
+
+| Probe context | `curl 127.0.0.1:3000/api/shops` |
+|---|---|
+| **WSL2 Ubuntu** (what `npm` actually used) | **000** — unreachable |
+| **Git Bash / MINGW64** (where I "tested" before) | **401** — reachable |
+
+My earlier "successful" runs invoked `npm` **from Git Bash**, where `bash` resolves
+to MinGW bash (Windows networking) — so they never exercised the founder's real
+path (launching from PowerShell/cmd → WSL). That is why the fix "worked for me"
+and failed for them. Exactly the trap this project keeps hitting: a green result
+from the wrong context proves nothing.
+
+**Fix: stop using a shell at all.** Rewrote the script in **Node**
+(`scripts/start-remote.mjs`), and `package.json` now runs
+`node scripts/start-remote.mjs`. `npm` → `cmd` → **`node` = the same Windows Node
+that runs the whole project**, so the health check (`http.get('127.0.0.1:3000')`),
+the cloudflared child process, and Expo all share Windows networking. No `bash`,
+no WSL, no namespace boundary — it behaves identically however it's launched. The
+old `start-remote.sh` was deleted.
+
+**A second bug the Node run then exposed and fixed:** a leftover Metro on **:8081**
+made `expo start` prompt *"use another port?"*, and with no interactive terminal it
+answered itself with *"Skipping dev server"* and bailed — which the retry loop
+misread as a slow tunnel. Added `freePort(8081)` before each Expo attempt (8081 is
+Metro's own port, so a leftover is always a stale dev server, safe to reclaim).
+
+**Proven live via `npm run start:remote` from PowerShell — the founder's real path:**
+- **Backend already running** → *"Backend already running on :3000 (HTTP 401) — using it"*.
+- **Backend down** → *"Starting the backend… Backend is up."* (Windows Node reaches the Windows backend it started.)
+- **API tunnel ready**, Expo **Tunnel ready**, then both proofs: public
+  `GET /api/shops` → **401**, and the manifest's `extra.apiBase` **exactly matches**
+  this run's tunnel URL.
+
+**Files:** `mobile/scripts/start-remote.mjs` (new, replaces the `.sh`),
+`mobile/scripts/start-remote.sh` (deleted), `mobile/package.json`
+(`start:remote` → node). `docs/MOBILE_CONNECTIVITY.md` unchanged — the user command
+`npm run start:remote` is the same.

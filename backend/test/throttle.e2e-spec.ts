@@ -81,4 +81,30 @@ describe("Rate limiting", () => {
     // Unauthenticated, so 401 — the point is that none are 429.
     expect(statuses.every((s) => s === 401)).toBe(true);
   });
+
+  it("cannot be bypassed by rotating a spoofed X-Forwarded-For (Phase 9)", async () => {
+    // The classic per-IP-limit bypass: send a different X-Forwarded-For on every
+    // request to claim a fresh budget each time. The app does NOT enable Express
+    // `trust proxy`, so XFF is ignored and the real socket IP is used — the
+    // header cannot mint new budget. If someone ever turns trust proxy on
+    // without pinning the tracker, this test fails and says why.
+    await resetRateLimitCounters();
+    const { limit } = RATE_LIMITS.otpRequest;
+    const spoofPhone = uniquePhone();
+    const statuses: number[] = [];
+
+    for (let i = 0; i < limit + 2; i++) {
+      const res = await request(app.getHttpServer())
+        .post("/api/auth/otp/request")
+        .set("X-Forwarded-For", `203.0.113.${i + 1}`) // a different "client" each time
+        .send({ phoneNumber: spoofPhone });
+      statuses.push(res.status);
+    }
+
+    // Same shape as the honest run: the spoofed header bought nothing.
+    expect(statuses.slice(0, limit)).toEqual(Array(limit).fill(200));
+    expect(statuses.slice(limit)).toEqual([429, 429]);
+
+    await prisma.user.deleteMany({ where: { phoneNumber: spoofPhone } });
+  });
 });
