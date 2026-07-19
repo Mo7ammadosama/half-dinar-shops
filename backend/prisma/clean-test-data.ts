@@ -19,6 +19,15 @@ import { PrismaClient } from "../generated/prisma/client";
 
 const TEST_SHOP_PREFIX = "[TEST] ";
 
+/**
+ * Prefixes that mark a stray test PRODUCT dropped into a real shop by the browser
+ * suites. The dashboard AI-entry test uses "[TEST] "; the merchant-app product
+ * CRUD suite uses "[E2E] " and deletes its own products, but a failed test can
+ * leave one behind — cleanup must catch both, or 21-instead-of-20 reads as a
+ * broken seed. (Shops are still matched by "[TEST] " only.)
+ */
+const TEST_PRODUCT_PREFIXES = ["[TEST] ", "[E2E] "];
+
 /** Reserved for automated tests. Never issue these to real customers. */
 const TEST_CUSTOMER_PHONE_PREFIX = "+962780000";
 
@@ -56,7 +65,7 @@ async function main() {
    * accounts at all, which is exactly the case that was slipping through.
    */
   const strayProducts = await prisma.product.findMany({
-    where: { name: { startsWith: TEST_SHOP_PREFIX } },
+    where: { OR: TEST_PRODUCT_PREFIXES.map((p) => ({ name: { startsWith: p } })) },
     select: { id: true, name: true, merchantId: true, _count: { select: { orderItems: true } } },
   });
   const testMerchantIds = new Set(

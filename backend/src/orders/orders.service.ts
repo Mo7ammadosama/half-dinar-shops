@@ -70,7 +70,9 @@ export class OrdersService {
     const placed = await this.prisma.$transaction(async (tx) => {
       const shop = await tx.merchant.findFirst({
         where: { id: dto.shopId, ...APPROVED_ONLY },
-        select: { id: true },
+        // userId is carried out so the shopkeeper's phone can be pushed to after
+        // commit — order.new is emitted with the shop id, not the user id.
+        select: { id: true, userId: true },
       });
       // 404, not 403: an unapproved shop must look like it does not exist.
       if (!shop) throw new NotFoundException("Shop not found.");
@@ -123,7 +125,11 @@ export class OrdersService {
         select: { id: true },
       });
 
-      return { ...(await this.findOneWithin(tx, customerId, order.id)), merchantId: shop.id };
+      return {
+        ...(await this.findOneWithin(tx, customerId, order.id)),
+        merchantId: shop.id,
+        merchantUserId: shop.userId,
+      };
     });
 
     // Alert the shop AFTER the transaction commits, never inside it.
@@ -138,10 +144,15 @@ export class OrdersService {
       type: "order.new",
       orderId: placed.id,
     });
+    // Push the new order to the shopkeeper's phone (merchant app, launch blocker
+    // B6b for the merchant side). Foreground shops still get the SSE event above
+    // and the app's own poll; this is what reaches a backgrounded/closed phone.
+    this.notifications.newOrderToMerchant(placed.merchantUserId, placed.id);
     this.escalation.watchNewOrder(placed.id, placed.merchantId);
 
-    // merchantId is internal routing detail, not part of the customer's view.
-    const { merchantId: _merchantId, ...customerView } = placed;
+    // merchantId / merchantUserId are internal routing detail, never part of the
+    // customer's view of their own order.
+    const { merchantId: _merchantId, merchantUserId: _merchantUserId, ...customerView } = placed;
     return customerView;
   }
 

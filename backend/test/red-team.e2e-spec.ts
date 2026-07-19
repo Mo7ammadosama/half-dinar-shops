@@ -176,6 +176,69 @@ describe("Cross-role attacks (8.3)", () => {
     it("cannot read the merchant profile", async () => {
       await http.get("/api/merchants/me").set(auth()).expect(403);
     });
+
+    it("cannot register a device against another account (userId is ignored)", async () => {
+      // The merchant app and the customer app share /auth/devices; the token
+      // identifies the caller, so a smuggled userId must be rejected outright,
+      // never used to receive a stranger's order notifications.
+      await http
+        .post("/api/auth/devices")
+        .set(auth())
+        .send({
+          token: "ExponentPushToken[attacker]",
+          platform: "android",
+          userId: "00000000-0000-4000-8000-000000000000",
+        })
+        .expect(400);
+    });
+  });
+
+  // ── An ADMIN reaching for merchant powers ─────────────────────────────────
+  //
+  // New with the standalone merchant app: the admin console and the merchant
+  // app are now separate products. An admin runs the platform; they must not be
+  // able to act AS a shop — confirm an order, edit a catalogue, or read the
+  // merchant-only order stream. The merchant surface is @Roles("MERCHANT"), and
+  // ADMIN is a different role, so every one of these must be refused.
+  describe("an ADMIN attacks the merchant surface", () => {
+    const auth = () => ({ Authorization: `Bearer ${adminToken}` });
+
+    it("cannot list a shop's orders", async () => {
+      await http.get("/api/merchant/orders").set(auth()).expect(403);
+    });
+
+    it("cannot read the shop's new-order count", async () => {
+      await http.get("/api/merchant/orders/pending-count").set(auth()).expect(403);
+    });
+
+    it("cannot subscribe to a shop's live order stream", async () => {
+      await http.get("/api/merchant/orders/stream").set(auth()).expect(403);
+    });
+
+    it("cannot confirm an order on a shop's behalf", async () => {
+      await http.post(`/api/merchant/orders/${victimOrderId}/confirm`).set(auth()).expect(403);
+    });
+
+    it("cannot create or list products", async () => {
+      await http.get("/api/products").set(auth()).expect(403);
+      await http
+        .post("/api/products")
+        .set(auth())
+        .send({ name: "Fake", price: 0.5, categoryId: "00000000-0000-4000-8000-000000000000" })
+        .expect(403);
+    });
+
+    it("cannot use AI product entry", async () => {
+      await http
+        .post("/api/products/suggest-from-photo")
+        .set(auth())
+        .attach("file", REAL_PNG, "x.png")
+        .expect(403);
+    });
+
+    it("cannot read the merchant profile", async () => {
+      await http.get("/api/merchants/me").set(auth()).expect(403);
+    });
   });
 
   describe("a CUSTOMER attacks the admin surface", () => {

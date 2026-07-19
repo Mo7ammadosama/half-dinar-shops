@@ -1996,3 +1996,396 @@ Metro's own port, so a leftover is always a stale dev server, safe to reclaim).
 `mobile/scripts/start-remote.sh` (deleted), `mobile/package.json`
 (`start:remote` → node). `docs/MOBILE_CONNECTIVITY.md` unchanged — the user command
 `npm run start:remote` is the same.
+
+---
+
+# Phase 10 — Standalone Merchant Mobile App — 2026-07-19
+
+**Goal (founder's brief):** the merchant needs their OWN native app — a separate product from both
+the customer app and the admin console — because many merchants will be onboarded and trained on it
+directly (App Store / Play Store, not a website). Port every merchant capability off the web
+dashboard, add **native camera → AI product entry** (the whole point of a phone), wire push for new
+orders, make the web dashboard **admin-only**, investigate the session-conflict bug, and attack the
+new role boundaries. Build → verify → STOP → report.
+
+## 10.0 — The one thing that changed the deliverable: merchant push did NOT exist
+
+The brief said merchant push for new orders "should already exist server-side from Phase 8 — wire the
+client to receive them." **It did not.** Phase 8 built, for the merchant, an in-process **SSE stream**
+plus four **browser** alert channels. `PushService.notifyUser` — the device-push path — was only ever
+called for the **customer** (`orders.service.ts` emits `order.new` to the SSE Subject; nothing pushed
+the merchant's phone).
+
+That premise being wrong collides with the other instruction ("no backend changes needed"). The
+discriminator: a merchant carrying a phone around their shop is not staring at an open app, so
+**closed-app push is the whole point** — the same logic the founder used for the camera. Shipping
+SSE-only and labelling it "push" would be exactly the theatre this project keeps warning against.
+
+**Decision: build the minimal backend hook and flag it as the one backend change.** Added
+`NotificationsService.newOrderToMerchant(merchantUserId, orderId)` → `PushService.notifyUser`, called
+from `orders.service.ts` right after the order transaction commits (fire-and-forget: a push failure
+must never roll back a real order). `order.new` carries the shop id, so the merchant's `userId` is now
+selected inside the order transaction and carried out. It reuses the existing `PushSender` seam — ~15
+lines, no stack change, no new endpoint (the merchant registers its device through the same
+`/auth/devices` the customer app uses).
+
+**Verified end-to-end** (`push.e2e-spec.ts`, +4 tests): register a device for the seeded merchant,
+place a real customer order through the API, and the merchant's device receives a "New order" message
+in the outbox — plus the addressed-to-the-merchant, broken-push-doesn't-fail-the-order, and
+event-recorded cases.
+
+## 10.1 — `merchant-app/`: a new Expo app, at parity with the family
+
+Copied the `mobile/` scaffold (NOT `create-expo-app` — that pulls the forbidden SDK 57 and the
+embedded-`.git` trap). Reuses the customer app's `theme.ts` design tokens and `resolveApiBase()`, so
+it reads as the same product. Token in the device keystore (`expo-secure-store`) under a **distinct**
+key (`halfdinar_merchant_token`) so the two apps never read each other's session.
+
+Screens (all React Native, styled from the shared tokens):
+- **LoginScreen** — phone+OTP sign-in and new-shop registration (PENDING approval).
+- **ProductsScreen** — product CRUD, availability toggle, search, and **camera → AI entry**:
+  `expo-image-picker` (lazy-required) → upload the photo → `suggest-from-photo` → fill only EMPTY
+  fields, with the confidence shown so a weak guess looks weak (carried over from the dashboard).
+- **OrdersScreen** — the full order loop: confirm, item confirmed/out-of-stock, start-picking,
+  cancel-with-mandatory-reason, assign-driver, drive delivery statuses. Polls every 10s (RN fetch
+  can't stream SSE); push covers the closed app.
+- **App.tsx** — session restore, **MERCHANT-role gate** (a customer/admin sees a clean "this app is
+  for shop owners" screen, detected by a 403 from `/merchants/me`, never trusting the client's own
+  role claim), Orders/Products tabs with a pending badge, and post-sign-in push registration.
+
+## 10.2 — The web dashboard is now the ADMIN CONSOLE
+
+Deleted `Dashboard/Orders/NewOrderAlert/useMerchantEvents/alertSound`, pruned every merchant
+method/type from its `api.ts`, and removed merchant registration from `Login`. `App.tsx` gates on
+ADMIN and shows non-admins a clear message + sign-out — never the (deleted) merchant screens, never a
+403 storm, never a reload loop. Storage keys renamed `halfdinar.admin.*`.
+
+**The "session-conflict bug" was inherent, not a deep defect.** One browser holds one localStorage
+token; logging in as a second role overwrote the first — that is one-browser-one-session, not a race.
+Moving merchants off the web means exactly ONE role belongs here, so the ambiguity is gone. The
+renamed keys stop a stray pre-Phase-10 merchant token from being mistaken for a session. Proven by
+`admin-auth.spec.ts`, including the exact "sign in as merchant, then as admin, in one browser"
+scenario — each lands on the right screen.
+
+## 10.3 — Attacks: the merchant app adds almost no new endpoint surface
+
+The merchant endpoints are pre-existing and already red-teamed. The genuinely new question is the new
+*separation*: an ADMIN token must not be able to act AS a shop. Extended `red-team.e2e-spec.ts` with
+an **"an ADMIN attacks the merchant surface"** block (orders, pending-count, SSE stream, confirm,
+product create/list, AI entry, profile — all 403) plus a device-registration userId-smuggling attempt
+(400). The merchant push hook has **no user-controlled target** (the `merchantUserId` is derived from
+the ordered shop), so it adds no attack surface. **67/67 cross-role attacks repelled.**
+
+## 10.4 — Test results (all run and verified)
+
+- **merchant-app:** `npm test` **8/8** (jest-expo native smoke rendering every screen + `imageSrc`
+  logic); `npm run test:e2e` **12/12** Playwright against a real backend + real Expo web (auth/role
+  gate 6 — including a **new-shop registration → sign-in → PENDING dashboard** end-to-end, the
+  founder's headline onboarding flow — products CRUD 3, order handling 3). `npm run typecheck` clean,
+  `expo-doctor` **17/18** (the app.json+app.config.js combo, same as the customer app — see §10.7),
+  `npm audit` **0**.
+- **merchant-dashboard (admin):** `npm run build` clean; `npm run test:e2e` **8/8** (admin-auth 5,
+  admin-escalation 3). `npm audit` **0**.
+- **backend:** `npm run test:db` **18/18**; `npm run test:e2e` **382/382** (17 suites, incl. +4
+  merchant-push and +11 red-team). `npm audit` **0**.
+- **DB restored to the seed baseline** afterwards (3 users / 1 shop / 20 products / 0 orders).
+
+## 10.5 — Honest verification limits (what the founder must still do on a phone)
+
+Same class as B5 / B6b — verifiable only on real hardware, so reported code-complete-but-unproven,
+NOT claimed working:
+- **Camera capture** (`expo-image-picker`) — the web target has no camera.
+- **Native multipart upload** of the photo (`{ uri, name, type }` FormData) — no file path on web.
+- **Push arriving on a closed phone** — needs an Expo project + a physical device (`docs/PUSH_SETUP.md`).
+
+Everything else — login, **new-shop registration**, the role gate, product CRUD, order handling, and
+every role boundary — is verified on the web target and the server boundary with real output above.
+
+**The customer app (`mobile/`) was NOT re-executed.** Its code was not touched in this phase; the only
+change that could affect it is the additive merchant-push side-effect in `orders.service.ts`, and the
+backend `orders`/`consistency` e2e (part of the 382 green) assert the customer-facing order response
+is unchanged. So all three apps were **not** re-walked — the merchant app and admin console were,
+the customer app's contract is covered by the backend suite.
+
+## 10.6 — What to do next (founder)
+
+1. Walk the merchant app on your phone via Expo Go (`npx expo start` in `merchant-app/`, sign in as
+   `0791234567`): confirm the **camera → AI fill** and that a **new order buzzes a closed phone**
+   (needs the Expo push project from `docs/PUSH_SETUP.md`).
+2. The admin console (`merchant-dashboard/`) is now admin-only — sign in as `0799999999`.
+3. `merchant-app/` is a new folder to commit; `node_modules` and Playwright artifacts are git-ignored,
+   no `.env` is present, no embedded `.git`. No secrets leave the machine.
+
+## 10.7 — Network-agnostic phone access: `npm run start:remote` (2026-07-19, founder-requested)
+
+After the build, the founder asked for the same reliable phone-testing path the customer app has —
+`start:remote`, which tunnels **both** Metro (Expo `--tunnel`) **and** the backend API (cloudflared),
+so a phone reaches everything from ANY network with no router/hotspot changes.
+
+**Ported, not reinvented.** `mobile/scripts/start-remote.mjs` is fully path-relative — it derives its
+own app directory from the script location and points `BACKEND_DIR` at the sibling `../backend` — so
+it was a near-verbatim copy into `merchant-app/scripts/`. Only the header comment and the internal
+`APP_DIR` variable name changed. The three supporting pieces:
+
+- **`app.config.js`** (re-added — it had been removed in the initial build since there was no
+  `start:remote` then): injects `EXPO_TUNNEL_API_BASE` into the manifest's `extra.apiBase`.
+- **`src/api.ts`** already preferred `Constants.expoConfig?.extra?.apiBase` (kept from the initial
+  build), so no change was needed — the auto-injected URL is picked up at runtime.
+- **`package.json`**: added `"start:remote": "node scripts/start-remote.mjs"`. `@expo/ngrok` was
+  already a devDependency and `.tunnel/` already git-ignored.
+
+**Verified live end-to-end (2026-07-19), the same way the customer app was (§9.5):**
+- **API tunnel:** cloudflared opened `https://engines-directed-pearl-mobiles.trycloudflare.com`.
+- **Publicly reachable from off the machine:** `GET …/api/shops` → **401** (protected route answers),
+  `POST …/api/auth/otp/request` → **200 + devCode** (public route works). So a phone on cellular data
+  reaches the backend.
+- **Expo tunnel:** *"Tunnel ready."*, Metro on :8081.
+- **The auto-injected API base is correct:** the served manifest's `extra.apiBase` was
+  `https://engines-directed-pearl-mobiles.trycloudflare.com/api` — **exactly** the API tunnel URL. This
+  is the value the app reads on the phone, so it calls the tunnelled backend, not `localhost`.
+- **Teardown works:** after Ctrl+C the public URL returned **HTTP 530** (Cloudflare "tunnel down") —
+  the random URL dies with the process, which is the security property that makes it safe to run.
+
+**Cost:** re-adding `app.config.js` means `expo-doctor` now reports **17/18** (it flags having both
+`app.json` and `app.config.js`) — identical to the customer app, and accepted for the same reason.
+
+**Same security caveat as `mobile/`:** while `start:remote` runs, the dev backend is on a public URL
+and returns login codes in its responses (no SMS provider yet), so **only run it while testing and
+Ctrl+C when done** — documented in `docs/MOBILE_CONNECTIVITY.md`.
+
+---
+
+# Phase 11 — Autonomous pass: parallel tunnels, merchant-app UX, richer seed, full test+attack
+
+Founder away, working autonomously with the standing rules: pick reasonable defaults, log every
+decision, verify everything myself, never wait. Five parts, worked in order.
+
+## 11.1 — Both `start:remote` scripts now run in parallel (Part 1)
+
+**The problem the founder reported:** running `npm run start:remote` in `mobile/` and then in
+`merchant-app/` (to test both apps on two phones) — the second one killed or conflicted with the
+first.
+
+**Diagnosis — three distinct cross-kills, all confirmed in the code:**
+
+| # | Vector | What happened |
+|---|---|---|
+| 1 | **Shared Metro port 8081** | Both scripts ran `expo start --tunnel` on Metro's default 8081, and both called `freePort(8081)` to clear a stale server. Starting the second app *freed* (killed) the first app's Metro. |
+| 2 | **`taskkill /IM cloudflared.exe /F` in `cleanup()`** | Ctrl+C on **either** app killed **every** cloudflared on the machine — including the other app's live API tunnel. |
+| 3 | **`taskkill /IM ngrok.exe /F` on retry** | The Expo-tunnel retry path killed **all** ngrok by image name — the other app's Expo tunnel with it. |
+
+**The fix (both scripts):**
+
+1. **Distinct Metro ports** — a new `METRO_PORT` constant: customer app **8081**, merchant app
+   **8082**, passed as `expo start --tunnel --port <n>`. `freePort(8081)` became `freePort(METRO_PORT)`,
+   so each frees only its own port. The plain `start`/`web` scripts are untouched (the e2e suites still
+   drive :8081).
+2. **cloudflared killed by PID, not image name** — `cleanup()` now runs
+   `taskkill /PID <cfProc.pid> /T /F` on its own child only. We spawn cloudflared directly, so its PID
+   is ours; a sibling session's tunnel is never touched.
+3. **ngrok killed by PID diff** — snapshot ngrok PIDs *before* spawning Expo (`listPids`), and on
+   failure kill only the ngrok PIDs that appeared since (`killNewPids`). The other app's ngrok was in
+   the snapshot, so it is spared.
+
+**Decision (founder away): recommend pre-starting the shared backend.** Both apps tunnel to the same
+`:3000`. If neither is running when the first script starts, that script starts and *owns* the
+backend, and Ctrl+C there stops the API for both. Documented workflow: run `npm run start` in
+`backend/` yourself first, so **neither** script owns the backend and quitting one never disturbs the
+other. (Each script already detects "backend already up → use it, don't own it".) Logged in
+`docs/MOBILE_CONNECTIVITY.md` and both script headers.
+
+**Proven — live, the runnable mechanisms (harness output captured):**
+
+- **Test A (cloudflared):** launched **two** real cloudflared tunnels to `:3000` at once — got two
+  **distinct** public URLs, both processes alive. Killed **one by PID** (the new cleanup) →
+  that one gone, **the other still alive**. The old `/IM` kill would have taken both. `PASS ×4`.
+- **Test B (Metro ports):** two child listeners on 8081 and 8082. `freePort(8082)` selects only the
+  8082 PID, never the 8081 PID (and symmetrically for `freePort(8081)`); running the real
+  `freePort(8082)` killed the merchant listener and **left the customer listener (8081) alive**.
+  `PASS ×8`.
+
+**What I could NOT verify here (honest limit, same class as B5):** the **full two-phone `--tunnel`
+end-to-end**. `start:remote`'s Metro leg uses Expo's ngrok tunnel, and this machine's environment
+cannot open an ngrok tunnel (recorded in §9.1 — *"ngrok would not connect here"*). So I proved the
+exact fix — the cloudflared and port cross-kills that were the reported bug — via the two live tests
+above, rather than fabricating a green from a run that would have died at the ngrok stage. cloudflared
+itself is fully working here (two live tunnels above), and the customer app's `--tunnel` leg was
+confirmed on real hardware previously (§9.5 / §10.7).
+
+## 11.2 — Merchant app made a real daily tool (Part 2)
+
+**Brief:** audit the merchant app as something a shopkeeper uses for hours a day, and reduce the
+friction — clearer order status, better product organisation, low-stock warnings, clearer feedback,
+undo where safe. I kept the same teal/amber design language (`theme.ts`) and **preserved every
+existing `testID`** so the 12 shipped e2e specs kept passing.
+
+**Three small shared building blocks (new):**
+- `src/Toast.tsx` — a non-blocking bottom toast (`pointerEvents="box-none"`, auto-dismiss, timer
+  cleared on unmount so the native smoke test stays clean). Optional single action, used only for Undo.
+- `src/Chips.tsx` — a horizontal row of selectable filter pills with count badges.
+- `src/time.ts` — `relativeTime` ("8 min ago") and `minutesSince`, unit-friendly (injectable `now`).
+
+**Orders screen — triage at a glance:**
+- **Status filter** (All / New / Active / Done) with **live counts** on each chip, so the shopkeeper
+  sees where the work is without opening anything.
+- **Relative timestamps** instead of a raw clock, and an **urgency flag** — a PENDING order older than
+  5 minutes gets a highlighted border and a "⏳ Waiting N min — please confirm" line. Sorting pins
+  pending orders to the top, oldest-waiting first (the SLA-correct order to work them).
+- **Pull-to-refresh** + a **Refresh** button + an "Updated N min ago" line (the poll is invisible; now
+  there is a visible, tappable sync for the web/desktop case too).
+- A **success toast after every action** (confirm, start picking, cancel, assign driver, delivery step,
+  mark item out of stock) — previously each completed silently. Out-of-stock items now also show
+  struck-through in the detail, and the detail carries a "Placed 8 min ago · 3 items · 1 out of stock"
+  summary line.
+
+**Products screen — organise and protect:**
+- **Out-of-stock warning banner** ("⚠️ N of M products out of stock · tap to review") that toggles the
+  list straight to the out-of-stock filter — the single thing a shopkeeper most needs to notice.
+- **Availability filter** (All / In stock / Out of stock, with counts) and **sort** (Recent / Name /
+  Price), applied client-side over the already-loaded list (search stays server-side) — no extra fetch.
+- **Delete is now a two-step confirm.** It was previously one careless tap from destroying a product
+  with no undo; it now shows an inline "Delete this? · Yes, delete / Keep".
+- **Undo on the availability toggle** (via the toast) — the one safely-reversible action. Per the
+  design rule, undo is deliberately **not** offered on order state changes, which notify the customer.
+- **Success toast** after add/save/toggle/delete.
+
+**Decision (founder away):** undo is limited to the availability toggle. Order transitions
+(confirm/cancel/out-of-stock-accept/delivery) fire customer-facing notifications and are governed by
+the server's cancellation policy, so a client-side "undo" there would be a correctness hazard, not a
+convenience. Feedback for those is a confirmation toast, not an undo.
+
+**Proven — green, live against the real backend + Expo web:**
+- **Typecheck:** clean (`tsc --noEmit`).
+- **Native render smoke (`jest-expo`):** 8/8 — every screen (now with the new Toast/Chips/filters)
+  renders on the native-simulated environment without crashing, and unmounts cleanly (no leaked timer).
+- **Playwright e2e: 15/15** (was 12) — the 12 original specs unchanged-and-green, plus **3 new**: the
+  order **status filter** narrows to New (and a pending order is absent under Done); the product
+  **out-of-stock banner + availability filter**; and **Delete → Keep** aborts while **Delete → Yes,
+  delete** removes. The `products.spec` delete step was updated for the new confirm flow.
+- **A test bug I caught and fixed:** my first "Delete/Keep" test used `getByText("Keep")` on a product
+  whose name literally contained "Keep" — a strict-mode collision with the button. That is a test that
+  would pass or fail for the wrong reason; renamed the fixture and pinned `{ exact: true }`, re-ran green.
+
+## 11.3 — More demo shops, demo customers, and demo orders (Part 3)
+
+**Brief:** seed several more demo shops (varied Amman locations, distinct products) and several demo
+customers at different locations, so distance sorting, distance display and order-response speed can be
+exercised with realistic variety — clearly test-marked and cleanable.
+
+**Decision (founder away) — what "customers at different locations" can and cannot mean.** The `users`
+table has **no location column** (id / phone / otp_verified / role / created_at). A customer's location
+lives only on the device — GPS, or a manually-picked area — and is sent per request by the customer
+app; it is never stored against the account. So a demo customer is inherently location-agnostic. I did
+**not** add a location column (a schema change, outside the brief). Instead:
+- **Demo shops carry the location** (they always did — lat/lng), and I grew them from **5 to 10**, at
+  real Amman coordinates from ~1 km to ~12 km from the pilot (added Jabal Amman, Tla' Al-Ali, Marka,
+  Jubeiha, Dabouq), each with its own distinct catalogue. That is what distance sorting/among-shops
+  actually needs, and it is unchanged-contract (`/shops` already returns lat/lng).
+- **Demo customers are accounts you sign in as**, each tagged in the seed with an *intended* home area
+  as a **label for manual testing** — to sort "from" that area you sign in and pick it (or allow GPS)
+  in the app. Four were added (`0780000900`–`903`), in the reserved `+962780000XXX` range so
+  `db:clean-test-data` removes them exactly like the demo shops.
+
+**Order-response speed → a separate, opt-in `seed:demo-orders`.** Multiple customers only exercise the
+merchant's order screen if there are orders to work. I added `backend/prisma/seed-demo-orders.ts`
+(`npm run seed:demo-orders`) that places **7 orders** from the demo customers against the demo shops,
+in every state and with **backdated timestamps** — including a PENDING order **14 minutes old** that
+trips the new "⏳ waiting N min" urgency flag. Five land on one flagship shop ("Weibdeh Mini Market",
+sign in as `0790000101`) so a single merchant login shows a full New/Active/Done queue; two more sit
+elsewhere for admin-console variety. It is **deliberately a separate script, not part of `seed:demo`**,
+because the e2e suites share this database and a pile of demo orders could skew a screenshot or an
+order-count — so demo orders are something you add to *demo*, then clean before running suites.
+
+**Proven — live:**
+- `npm run seed:demo` → 10 shops (all APPROVED, all `[TEST] `) + 4 customers. `npm run seed:demo-orders`
+  → 7 orders. Verified through the **real API**: signing in as the Weibdeh merchant returns exactly the
+  5-order queue — 2 PENDING, 1 CONFIRMED, 1 PREPARING (1 item out of stock), 1 DELIVERED — and the
+  customer phone is present only on the CONFIRMED/PREPARING orders (the server-side contact-window rule
+  still holds on this seeded data, not just on live-placed orders).
+- **Cleanability proven end-to-end:** `db:clean-test-data` removed all 10 demo shops, all demo
+  customers, and all 7 demo orders, returning the DB to the exact base seed (**1 shop, 3 users, 20
+  products, 0 orders**). Re-running `seed:demo` restores the demo dataset.
+
+**A real hygiene gap found and fixed while verifying.** After cleanup the pilot shop held **23**
+products, not 20 — three strays cleanup had never caught: one `[E2E] `-prefixed product leaked by a
+merchant-app product test that failed mid-run (before I fixed its locator), and two ad-hoc old
+leftovers (`Test2`, `Test product`). `clean-test-data` only ever swept stray **`[TEST] `** products, but
+the merchant-app CRUD suite marks its products **`[E2E] `** — so a failed run there leaked silently and
+read later as a broken seed. Fixed `clean-test-data` to sweep **both** prefixes; deleted the two ad-hoc
+leftovers by hand (no systematic marker to encode). Product count is back to **20**, and the improved
+sweep now catches the `[E2E] ` class automatically.
+
+## 11.4 — Exhaustive test + attack pass across all three profiles (Part 4)
+
+**Brief:** test every button/field/screen across the customer app, merchant app and admin console —
+not a sample — then attack all three profiles (cross-role, invalid state transitions at the API,
+malformed/hostile input, rate-limit/OTP abuse). Fix anything found, prove the fix with a test,
+sabotage it again, log severity.
+
+### The regression battery — all green
+
+| Suite | Result |
+|---|---|
+| Backend DB integrity (`test:db`) | **18 / 18** |
+| Backend API + attack e2e (`test:e2e`, 17 suites) | **382 / 382** |
+| Merchant app — jest (native smoke + imageSrc) | **8 / 8** |
+| Merchant app — Playwright e2e | **17 / 17** (12 prior + 5 new: status filter, out-of-stock filter/banner, delete-confirm/keep, Undo, sort) |
+| Customer app — jest | **19 / 19** |
+| Customer app — Playwright e2e | **32 / 32** |
+| Admin console — Playwright e2e (auth + escalation + usability) | **10 / 10** |
+
+**Total: 486 automated tests green**, run live against the real backend + Redis + Postgres and the
+real Expo-web / Vite targets.
+
+### The main find — Phase 10 silently orphaned 8 customer-app tests (severity: HIGH for coverage)
+
+Running the customer-app e2e — which **Phase 10 explicitly did not re-run** — surfaced **8 failing
+tests** across `order-cycle.spec.ts` (4), `delivery.spec.ts` (3) and `full-lifecycle.spec.ts` (1).
+
+**What it would have allowed:** these specs are the *only* automated proof that the **customer app
+reflects order and delivery state** — "the shop is picking your items", the out-of-stock revised
+total, "on its way", the driver's number, cancellation + reason, the post-delivery review. They had
+been **red since Phase 10** and nobody knew, because Phase 10 moved every merchant screen out of the
+web dashboard into the standalone merchant app (the dashboard is admin-only now) — and these specs
+still drove the **deleted dashboard merchant UI** (`signInMerchant` → `tab-orders`). So a real
+regression in the customer's order-tracking could have shipped with a green local run of the suites
+people actually ran, while this suite quietly failed.
+
+**The fix (correct, not a patch-over):** the unique value of these specs is the **customer** side; the
+merchant UI is now covered by `merchant-app/e2e`. So the merchant counterpart is driven through the
+**API** via a new `mobile/e2e/merchant-api.ts` helper (the same pattern `merchant-app/e2e/orders.spec`
+already uses to set orders up), and **every customer-app assertion is unchanged**. `full-lifecycle`
+keeps driving the **admin console UI** (which still exists) and the **customer app UI**, with only the
+merchant registration/stocking/order-handling moved to the API. One redundant test ("a driver cannot
+be assigned before picking") was a pure dashboard-UI assertion of a server rule already covered by the
+backend API suite and `merchant-app/e2e`; it was removed with a pointer, following this file's existing
+precedent (the DELIVERING note). Net customer-app e2e: 33 → **32**, all green, coverage preserved.
+
+### Attack pass — re-verified, and a sabotage to prove the tests bite
+
+My Parts 1–3 added **no new backend endpoint** (merchant filtering is client-side; demo data is just
+rows), so there is **no new attack surface** — the honest and complete result is that the existing
+**cross-role / invalid-transition / malformed-input / rate-limit / OTP** attack suites (red-team,
+attack-surface, throttle — 67+ attacks) **all still repel, 0 new vulnerabilities**. Rather than invent
+a marginal "fix", I **sabotaged a real invariant to prove the attack tests catch regressions**: I made
+the merchant order **list** leak `customerPhone` in every status (breaking the mutual contact-window
+rule, the subtle 8.3 finding). The red-team + consistency suites **failed immediately** —
+`expect(row.customerPhone).toBeNull()` received the leaked `+962791111111` — **17 assertions caught
+it**. Reverted; `git diff src/` clean, no `SABOTAGE` markers remain, suites green again.
+
+### DB restored, then made demo-ready
+
+The suites leave real rows (test customers, `[TEST] ` shops, orders). Cleaned to base seed, then
+noticed the documented Phase-9 gap — `clean-test-data` sweeps the `+962780000` range but the backend
+e2e leaves random `+96279…` customer stubs — and removed those 8 stubs by hand (customer role, no
+orders, not seed/not demo). Final state is **pristine and demo-ready**: 1 pilot shop + **10 demo
+shops**, 3 seed accounts + **4 demo customers**, **20** pilot products, **0** orders. (Demo orders were
+NOT re-seeded — `seed:demo-orders` is the opt-in demo step.)
+
+### Decisions (founder away)
+1. **Fix the orphaned specs by driving the merchant via API, not by standing up a second app UI.** The
+   merchant UI is already covered by `merchant-app/e2e`; re-driving it here would duplicate that and
+   need two Expo servers during one run. API-driving is faster, matches the established pattern, and
+   loses no customer-side coverage.
+2. **Don't manufacture a new attack "fix."** No new surface means no new vuln; the right deliverable is
+   a genuine re-verification plus a sabotage that proves the harness bites — which it does.

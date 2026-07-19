@@ -1,41 +1,22 @@
 /**
- * Typed client for the Half-Dinar Shops API.
+ * Typed client for the Half-Dinar Shops API — ADMIN console.
  *
  * Holds the JWT in memory + localStorage and attaches it to every request.
+ *
+ * This client only covers auth + the admin surface. The merchant surface
+ * (products, merchant orders, uploads, AI photo entry) moved to the native
+ * merchant app (merchant-app/) along with the merchant screens, so it was
+ * removed here rather than left as dead, misleading code.
  */
 
-// Exported so the SSE stream (useMerchantEvents) can reach the same API without
-// a second source of truth for the base URL.
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000/api";
-const TOKEN_KEY = "halfdinar.merchant.token";
-const ROLE_KEY = "halfdinar.merchant.role";
 
-export interface Product {
-  id: string;
-  name: string;
-  price: string;
-  imageUrl: string | null;
-  isAvailable: boolean;
-  categoryId: string;
-  categoryName: string | null;
-  categoryPath: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  path: string;
-}
-
-export interface MerchantProfile {
-  id: string;
-  shopName: string;
-  status: "PENDING" | "APPROVED" | "SUSPENDED";
-  openingHours: string;
-  productCount: number;
-}
+// Distinct "admin" keys. This app is admin-only now, and a leftover merchant
+// token from an older build of this same web app must never be picked up here
+// and mistaken for a session — part of closing the old multi-role session
+// ambiguity (see App.tsx).
+const TOKEN_KEY = "halfdinar.admin.token";
+const ROLE_KEY = "halfdinar.admin.role";
 
 export type OrderStatus =
   | "PENDING"
@@ -79,21 +60,6 @@ export interface AdminCategory {
 }
 
 /**
- * What the AI read from a product photo. A SUGGESTION — nothing is saved until
- * the merchant confirms the form.
- */
-export interface ProductSuggestion {
-  name: string;
-  categoryId: string | null;
-  /** Fixed-2 JOD string, or null if the AI would not guess. */
-  price: string | null;
-  /** 0..1. Shown to the merchant so a weak guess looks weak. */
-  confidence: number;
-  /** "claude" for real recognition, "mock" for the canned dev suggestions. */
-  provider: string;
-}
-
-/**
  * An order a shop has not acknowledged for long enough that the admin needs to
  * step in. Derived server-side from the order's age — see escalation-policy.ts.
  */
@@ -123,60 +89,6 @@ export interface AdminOrder {
   delivery: { captainName: string; status: string } | null;
   review: { rating: number; comment: string | null } | null;
   createdAt: string;
-}
-
-export interface OrderSummary {
-  id: string;
-  status: OrderStatus;
-  /** Null outside the shop's contact window — withheld by the server, not hidden here. */
-  customerPhone: string | null;
-  totalPrice: string;
-  itemCount: number;
-  unavailableCount: number;
-  createdAt: string;
-}
-
-export interface OrderItem {
-  id: string;
-  productId: string;
-  name: string;
-  imageUrl: string | null;
-  quantity: number;
-  priceAtOrder: string;
-  lineTotal: string;
-  status: "CONFIRMED" | "UNAVAILABLE";
-}
-
-export type DeliveryStatus = "ASSIGNED" | "PICKED_UP" | "ON_WAY" | "DELIVERED" | "FAILED";
-
-export interface Delivery {
-  id: string;
-  captainName: string;
-  /** Shown in full — no masking, as specified. */
-  captainPhone: string;
-  status: DeliveryStatus;
-  deliveredAt: string | null;
-}
-
-export interface OrderDetail {
-  id: string;
-  status: OrderStatus;
-  /**
-   * phoneNumber is null outside the shop's contact window (CONFIRMED /
-   * PREPARING) — the server withholds it, so the call button cannot be
-   * "unhidden" to get at a number that is not there.
-   */
-  customer: { id: string; phoneNumber: string | null };
-  deliveryFee: string;
-  totalPrice: string;
-  revisedTotal: string;
-  hasUnavailableItems: boolean;
-  cancelledBy: "CUSTOMER" | "MERCHANT" | "SYSTEM" | null;
-  cancellationReason: string | null;
-  createdAt: string;
-  delivery: Delivery | null;
-  canAssignDelivery: boolean;
-  items: OrderItem[];
 }
 
 export function getToken(): string | null {
@@ -218,10 +130,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(init.headers);
 
-  // FormData sets its own multipart boundary — setting Content-Type breaks it.
-  if (!(init.body instanceof FormData) && init.body) {
-    headers.set("Content-Type", "application/json");
-  }
+  if (init.body) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
@@ -251,104 +160,6 @@ export const api = {
     call<{ accessToken: string; user: { role: string } }>("/auth/otp/verify", {
       method: "POST",
       body: JSON.stringify({ phoneNumber, code }),
-    }),
-
-  registerMerchant: (data: {
-    phoneNumber: string;
-    shopName: string;
-    locationLat: number;
-    locationLng: number;
-    openingHours: string;
-  }) => call<unknown>("/merchants/register", { method: "POST", body: JSON.stringify(data) }),
-
-  profile: () => call<MerchantProfile>("/merchants/me"),
-
-  categories: () => call<Category[]>("/categories"),
-
-  listProducts: (search?: string) =>
-    call<Product[]>(`/products${search ? `?search=${encodeURIComponent(search)}` : ""}`),
-
-  createProduct: (data: {
-    name: string;
-    price: number;
-    categoryId: string;
-    imageUrl?: string;
-  }) => call<Product>("/products", { method: "POST", body: JSON.stringify(data) }),
-
-  updateProduct: (
-    id: string,
-    data: Partial<{ name: string; price: number; categoryId: string; imageUrl: string }>,
-  ) => call<Product>(`/products/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-
-  setAvailability: (id: string, isAvailable: boolean) =>
-    call<Product>(`/products/${id}/availability`, {
-      method: "PATCH",
-      body: JSON.stringify({ isAvailable }),
-    }),
-
-  deleteProduct: (id: string) => call<{ deleted: boolean }>(`/products/${id}`, { method: "DELETE" }),
-
-  uploadImage: (file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return call<{ imageUrl: string }>("/uploads/product-image", { method: "POST", body: form });
-  },
-
-  /**
-   * Reads a product photo and suggests name/category/price.
-   *
-   * Saves nothing — creating the product is still createProduct(), after the
-   * merchant has confirmed the form.
-   */
-  suggestFromPhoto: (file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return call<ProductSuggestion>("/products/suggest-from-photo", { method: "POST", body: form });
-  },
-
-  // --- Order handling (Phase 5) ---
-
-  listOrders: (status?: OrderStatus) =>
-    call<OrderSummary[]>(`/merchant/orders${status ? `?status=${status}` : ""}`),
-
-  /** Drives the new-order alarm. escalationLevel is the WORST among pending orders. */
-  pendingOrderCount: () =>
-    call<{ pending: number; escalationLevel: 0 | 1 | 2 }>("/merchant/orders/pending-count"),
-
-  getOrder: (id: string) => call<OrderDetail>(`/merchant/orders/${id}`),
-
-  setItemStatus: (orderId: string, itemId: string, status: "CONFIRMED" | "UNAVAILABLE") =>
-    call<OrderDetail>(`/merchant/orders/${orderId}/items/${itemId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    }),
-
-  confirmOrder: (id: string) =>
-    call<OrderDetail>(`/merchant/orders/${id}/confirm`, { method: "POST" }),
-
-  startPreparing: (id: string) =>
-    call<OrderDetail>(`/merchant/orders/${id}/start-preparing`, { method: "POST" }),
-
-  /** The reason is mandatory and is shown to the customer. */
-  cancelOrder: (id: string, reason: string) =>
-    call<OrderDetail>(`/merchant/orders/${id}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
-    }),
-
-  // --- Delivery (Phase 6) — manual, no captain app yet ---
-
-  assignDelivery: (id: string, captainName: string, captainPhone: string) =>
-    call<OrderDetail>(`/merchant/orders/${id}/delivery`, {
-      method: "POST",
-      body: JSON.stringify({ captainName, captainPhone }),
-    }),
-
-  /** `note` is required when marking FAILED — that cancels the order. */
-  updateDelivery: (id: string, status: DeliveryStatus, note?: string) =>
-    call<OrderDetail>(`/merchant/orders/${id}/delivery`, {
-      method: "PATCH",
-      body: JSON.stringify(note ? { status, note } : { status }),
     }),
 
   // --- Admin (Phase 7) — ADMIN role only ---
@@ -392,19 +203,3 @@ export const api = {
   /** Orders a shop has ignored long enough to need the admin. */
   adminIgnoredOrders: () => call<IgnoredOrder[]>("/admin/orders/ignored"),
 };
-
-/** Absolute URL for an image path returned by the API. */
-/**
- * Resolves a product photo to a loadable URL.
- *
- * `image_url` is relative ("/uploads/x.jpg") when the backend stores photos on
- * local disk, and absolute ("https://cdn/x.jpg") when it uses object storage.
- * An absolute URL must pass through untouched — prepending the API base would
- * yield "http://localhost:3000https://cdn/x.jpg", silently breaking every photo
- * the moment storage moves to the cloud.
- */
-export function imageSrc(path: string | null): string | null {
-  if (!path) return null;
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${API_BASE.replace(/\/api$/, "")}${path}`;
-}

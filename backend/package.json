@@ -21,6 +21,7 @@
     "test:db": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-integration.json --runInBand",
     "seed": "prisma db seed",
     "seed:demo": "ts-node prisma/seed-demo-shops.ts",
+    "seed:demo-orders": "ts-node prisma/seed-demo-orders.ts",
     "verify": "ts-node prisma/verify.ts",
     "db:clean-test-data": "ts-node prisma/clean-test-data.ts",
     "db:migrate": "prisma migrate dev",

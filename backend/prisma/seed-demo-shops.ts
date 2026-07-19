@@ -1,11 +1,26 @@
 /**
- * Demo shops for exercising the "nearest shop" experience.
+ * Demo shops AND demo customers for exercising the marketplace with realistic
+ * variety.
  *
- * The pilot ships with ONE shop, which makes it impossible to see the customer
- * app sort shops by distance. This script adds a handful of extra APPROVED shops
- * at real Amman coordinates spread from ~1 km to ~9 km from the downtown pilot,
- * each with its own small catalogue, so a customer sees a list of shops ordered
- * by how near they are.
+ * The pilot ships with ONE shop and ONE seeded customer, which makes it hard to
+ * see the customer app sort shops by distance or to try the app from more than
+ * one perspective. This script adds a set of extra APPROVED shops at real Amman
+ * coordinates spread from ~1 km to ~12 km from the downtown pilot, each with its
+ * own small catalogue — and a handful of demo customer accounts.
+ *
+ * ── About the demo customers and "location" ────────────────────────────────
+ * The `users` table has NO location column — a customer's location lives only on
+ * the device (GPS, or a manually-picked area) and is sent per-request by the
+ * customer app; it is never stored against the account. So a demo customer is
+ * location-agnostic: to exercise distance sorting "from" a given area, sign in as
+ * any demo customer and pick that area (or allow GPS) in the app. Each demo
+ * customer below is tagged with an INTENDED home area purely as a label for
+ * manual testing — it is documentation, not stored data.
+ *
+ * To see order variety and the merchant "order-response speed" cues (the New /
+ * Active / Done filters and the "waiting N min" urgency flag), also run the
+ * companion script:  npm run seed:demo-orders  — it places a spread of orders,
+ * some deliberately backdated, from these demo customers against these demo shops.
  *
  * ── This is TEST DATA ──────────────────────────────────────────────────────
  * Every shop here is name-prefixed "[TEST] ", exactly like the shops the browser
@@ -56,10 +71,11 @@ type DemoShop = {
 };
 
 /**
- * Five shops at real Amman coordinates, at increasing distance from the pilot
+ * Ten shops at real Amman coordinates, at increasing distance from the pilot
  * (downtown Al-Balad, 31.9539 / 35.9106):
- *   Weibdeh ~1.1 km · Shmeisani ~2.0 km · Abdoun ~3.1 km ·
- *   Sweifieh ~4.8 km · Khalda ~8.8 km
+ *   Weibdeh ~1.1 km · Jabal Amman ~1.3 km · Shmeisani ~2.0 km · Abdoun ~3.1 km ·
+ *   Sweifieh ~4.8 km · Tla' Al-Ali ~7.1 km · Marka ~7.3 km · Khalda ~8.8 km ·
+ *   Jubeiha ~9.8 km · Dabouq ~12.4 km
  */
 const DEMO_SHOPS: DemoShop[] = [
   {
@@ -143,6 +159,97 @@ const DEMO_SHOPS: DemoShop[] = [
       { name: "Colour Pencils (12)", price: "0.90", category: "Stationery" },
     ],
   },
+  {
+    phone: "0790000106",
+    shopName: "Jabal Amman Sundries",
+    lat: 31.951,
+    lng: 35.92,
+    openingHours: "08:00-23:00",
+    products: [
+      { name: "Wooden Clothes Hanger", price: "0.40", category: "Kitchen" },
+      { name: "Scented Candle", price: "0.85", category: "Kitchen" },
+      { name: "Oat Cookies", price: "0.45", category: "Biscuits & Sweets" },
+      { name: "Ginger Ale 330ml", price: "0.50", category: "Drinks" },
+      { name: "Bath Loofah", price: "0.55", category: "Personal Care" },
+      { name: "Eraser Pack", price: "0.20", category: "Stationery" },
+    ],
+  },
+  {
+    phone: "0790000107",
+    shopName: "Tla Al Ali Basics",
+    lat: 31.995,
+    lng: 35.845,
+    openingHours: "07:00-24:00",
+    products: [
+      { name: "Salad Spinner", price: "0.95", category: "Kitchen" },
+      { name: "Microfibre Cloth", price: "0.60", category: "Cleaning Supplies" },
+      { name: "Coconut Biscuits", price: "0.50", category: "Biscuits & Sweets" },
+      { name: "Pomegranate Juice 250ml", price: "0.65", category: "Drinks" },
+      { name: "Deodorant Stick", price: "0.90", category: "Personal Care" },
+      { name: "Glue Stick", price: "0.35", category: "Stationery" },
+    ],
+  },
+  {
+    phone: "0790000108",
+    shopName: "Marka Daily Store",
+    lat: 31.972,
+    lng: 35.982,
+    openingHours: "08:30-22:30",
+    products: [
+      { name: "Egg Whisk", price: "0.45", category: "Kitchen" },
+      { name: "Toilet Brush", price: "0.70", category: "Cleaning Supplies" },
+      { name: "Honey Wafers", price: "0.40", category: "Biscuits & Sweets" },
+      { name: "Tamarind Drink 250ml", price: "0.55", category: "Drinks" },
+      { name: "Nail Clippers", price: "0.50", category: "Personal Care" },
+      { name: "Notebook A5", price: "0.60", category: "Stationery" },
+    ],
+  },
+  {
+    phone: "0790000109",
+    shopName: "Jubeiha Value Mart",
+    lat: 32.015,
+    lng: 35.87,
+    openingHours: "07:30-23:30",
+    products: [
+      { name: "Ice Cube Tray", price: "0.35", category: "Kitchen" },
+      { name: "Rubber Gloves", price: "0.55", category: "Cleaning Supplies" },
+      { name: "Fig Rolls", price: "0.50", category: "Biscuits & Sweets" },
+      { name: "Rosewater Drink 250ml", price: "0.60", category: "Drinks" },
+      { name: "Hair Comb", price: "0.30", category: "Personal Care" },
+      { name: "Correction Tape", price: "0.70", category: "Stationery", available: false },
+    ],
+  },
+  {
+    phone: "0790000110",
+    shopName: "Dabouq Corner",
+    lat: 32.02,
+    lng: 35.8,
+    openingHours: "09:00-22:00",
+    products: [
+      { name: "Salt and Pepper Set", price: "0.80", category: "Kitchen" },
+      { name: "Laundry Powder Sachet", price: "0.45", category: "Cleaning Supplies" },
+      { name: "Almond Cookies", price: "0.55", category: "Biscuits & Sweets" },
+      { name: "Barley Water 300ml", price: "0.50", category: "Drinks" },
+      { name: "Cotton Pads Pack", price: "0.40", category: "Personal Care" },
+      { name: "Ballpoint Pens (5)", price: "0.65", category: "Stationery" },
+    ],
+  },
+];
+
+/**
+ * Demo customer accounts. All sit in the reserved test range +962780000XXX, so
+ * `npm run db:clean-test-data` removes them exactly like the demo shops (re-run
+ * this script to restore). The `area` is an INTENDED home area for manual testing
+ * only — it is NOT stored anywhere (users have no location column); sign in as the
+ * customer and pick that area (or allow GPS) in the app to sort shops from there.
+ */
+type DemoCustomer = { phone: string; area: string };
+
+const DEMO_CUSTOMERS: DemoCustomer[] = [
+  { phone: "0780000900", area: "Weibdeh (near the pilot)" },
+  { phone: "0780000901", area: "Sweifieh (mid distance)" },
+  { phone: "0780000902", area: "Khalda (far west)" },
+  { phone: "0780000903", area: "Marka (far east)" },
 ];
 
 /** Resolves a category id by its name from the seeded tree. */
@@ -221,7 +328,24 @@ async function main() {
   }
 
   console.log(`\nSeeded ${DEMO_SHOPS.length} demo shops (all APPROVED, all "[TEST] "-marked).`);
-  console.log("Remove them any time with:  npm run db:clean-test-data");
+
+  console.log("\nSeeding demo customers...\n");
+  for (const c of DEMO_CUSTOMERS) {
+    const phoneE164 = `+962${c.phone.replace(/^0/, "")}`;
+    await prisma.user.upsert({
+      where: { phoneNumber: phoneE164 },
+      update: { role: "CUSTOMER", otpVerified: true },
+      create: { phoneNumber: phoneE164, role: "CUSTOMER", otpVerified: true },
+    });
+    console.log(`  ${c.phone}  (intended area: ${c.area})`);
+  }
+  console.log(
+    `\nSeeded ${DEMO_CUSTOMERS.length} demo customers (reserved +962780000XXX range). ` +
+      `Sign in with the local phone (e.g. 0780000900); the login code is shown on screen.`,
+  );
+
+  console.log("\nRemove all of the above any time with:  npm run db:clean-test-data");
+  console.log("Add demo orders to see the merchant order screen in action:  npm run seed:demo-orders");
 }
 
 main()

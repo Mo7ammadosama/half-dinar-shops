@@ -65,6 +65,28 @@ You'll see it print the API tunnel URL, then Expo's QR code.
 
 Press **Ctrl+C** in the terminal to close both tunnels when you're finished.
 
+### Testing the customer AND merchant app at the same time (two phones)
+
+Both apps ship `npm run start:remote`, and the two are built to run **in parallel**
+so you can test the whole marketplace at once — customer on one phone, shopkeeper
+on another:
+
+1. **Start the shared backend yourself first**, once, in its own terminal:
+   ```bash
+   cd backend && npm run start
+   ```
+   This matters: if you skip it, whichever app you launch first starts the backend
+   and *owns* it — pressing Ctrl+C there would stop the API for both apps. Start it
+   yourself and **neither** app owns it, so quitting one never disturbs the other.
+2. In a second terminal: `cd mobile && npm run start:remote` (customer, Metro 8081).
+3. In a third terminal: `cd merchant-app && npm run start:remote` (merchant, Metro 8082).
+
+Each app uses a **different Metro port** and opens its **own** cloudflared API
+tunnel, and each tears down **only its own** processes on Ctrl+C (by PID, never by
+image name). So the two sessions no longer fight over port 8081 or kill each
+other's tunnel — earlier they did, and starting the second app knocked the first
+one offline. Scan each QR with a separate phone (or two Expo Go sessions).
+
 ### 🔒 Security — read this once
 
 While `start:remote` is running, your **development** backend is reachable on a

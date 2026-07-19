@@ -341,4 +341,113 @@ describe("Customer push notifications (blocker B6)", () => {
       jest.restoreAllMocks();
     });
   });
+
+  /**
+   * Merchant new-order push (the merchant app's B6b).
+   *
+   * The dashboard's SSE stream only reaches a shopkeeper with the tab open; a
+   * merchant carrying a phone needs the new order to arrive on a CLOSED app.
+   * This is the one server change the merchant-app work required — the client
+   * side (the app) cannot be verified without a device, but the server producing
+   * the right push, addressed to the merchant's own devices, is verified here
+   * end-to-end: a real customer order lands a real message in the merchant's
+   * outbox.
+   */
+  describe("new order pushes the shopkeeper's phone", () => {
+    let app: INestApplication;
+    let prisma: PrismaService;
+    let notifications: NotificationsService;
+    let push: PushService;
+    let outbox: ConsolePushSender;
+    let http: TestAgent;
+    let merchantUserId: string;
+    let pilotShopId: string;
+    const createdOrderIds: string[] = [];
+
+    beforeAll(async () => {
+      ({ app, prisma } = await createTestApp());
+      notifications = app.get(NotificationsService);
+      push = app.get(PushService);
+      outbox = app.get(ConsolePushSender);
+      http = request(app.getHttpServer());
+
+      const merchant = await prisma.merchant.findFirstOrThrow({
+        where: { user: { phoneNumber: "+962791234567" } },
+        select: { id: true, userId: true },
+      });
+      merchantUserId = merchant.userId;
+      pilotShopId = merchant.id;
+    });
+
+    afterEach(async () => {
+      await prisma.deviceToken.deleteMany({ where: { userId: merchantUserId } });
+    });
+
+    afterAll(async () => {
+      if (createdOrderIds.length) {
+        await prisma.orderItem.deleteMany({ where: { orderId: { in: createdOrderIds } } });
+        await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } });
+      }
+      await app.close();
+    });
+
+    it("addresses the push to the MERCHANT's user, not the customer", () => {
+      const sent = jest.spyOn(push, "notifyUser").mockResolvedValue(1);
+
+      notifications.newOrderToMerchant(merchantUserId, "order-m1");
+
+      expect(sent).toHaveBeenCalledWith(
+        merchantUserId,
+        expect.objectContaining({ title: "New order" }),
+      );
+      expect(notifications.eventsFor("order-m1")[0].type).toBe("order.new_to_merchant");
+      jest.restoreAllMocks();
+    });
+
+    it("a broken push must not fail the customer's order", () => {
+      jest.spyOn(push, "notifyUser").mockRejectedValue(new Error("push down"));
+      expect(() => notifications.newOrderToMerchant(merchantUserId, "order-m2")).not.toThrow();
+      jest.restoreAllMocks();
+    });
+
+    it("end-to-end: a placed order reaches the merchant's registered device", async () => {
+      // The shopkeeper's phone, registered through the same /auth/devices path
+      // the customer app uses.
+      await push.registerDevice(merchantUserId, "ExponentPushToken[shopkeeper]", "android");
+
+      // A real customer places a real order against the pilot shop.
+      const phone = `+962780000${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`;
+      const otp = await http.post("/api/auth/otp/request").send({ phoneNumber: phone });
+      const verify = await http
+        .post("/api/auth/otp/verify")
+        .send({ phoneNumber: phone, code: otp.body.devCode });
+      const customerAuth = `Bearer ${verify.body.accessToken}`;
+
+      const product = await prisma.product.findFirstOrThrow({
+        where: { merchantId: pilotShopId, isAvailable: true },
+        select: { id: true },
+      });
+
+      const placed = await http
+        .post("/api/orders")
+        .set("Authorization", customerAuth)
+        .send({ shopId: pilotShopId, items: [{ productId: product.id, quantity: 1 }] })
+        .expect(201);
+      createdOrderIds.push(placed.body.id);
+
+      // The push is fire-and-forget (not awaited inside the request), so give the
+      // microtask a tick to land in the outbox.
+      await new Promise((r) => setTimeout(r, 50));
+
+      const message = outbox.lastMessageTo("ExponentPushToken[shopkeeper]");
+      expect(message).toBeDefined();
+      expect(message?.title).toBe("New order");
+
+      // Remove the order before the customer — the order FK-references the user.
+      await prisma.orderItem.deleteMany({ where: { orderId: placed.body.id } });
+      await prisma.order.deleteMany({ where: { id: placed.body.id } });
+      createdOrderIds.pop();
+      await prisma.user.deleteMany({ where: { phoneNumber: phone } });
+    });
+  });
 });

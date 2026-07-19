@@ -1,20 +1,32 @@
 /**
- * PHASE 7 FINAL TEST — the whole product, end to end, in real browsers.
+ * FINAL TEST — the whole product, end to end, in real browsers + the real API.
  *
- * One order's entire life, driven through three real UIs by three real people:
+ * One order's entire life, across three roles:
  *
- *   ADMIN     approves a brand-new shop and adds a master category
- *   MERCHANT  registers, stocks a product, takes the order, picks it, sends it
- *   CUSTOMER  signs up, browses, orders, calls the shop, tracks, receives, reviews
- *   ADMIN     sees the finished order and its review
+ *   ADMIN     approves a brand-new shop and adds a master category   (web console UI)
+ *   MERCHANT  registers, stocks a product, takes the order, sends it (API — see below)
+ *   CUSTOMER  signs up, browses, orders, calls the shop, tracks, reviews (customer app UI)
+ *   ADMIN     sees the finished order and its review                 (web console UI)
  *
- * Nothing is stubbed: every step is a click or a keystroke against the real API
- * and the real database. This is the Phase 7 requirement — proving Phases 1–7
- * work together.
+ * The ADMIN console and the CUSTOMER app are exercised through their real UIs.
+ * The MERCHANT is driven through the API (merchant-api.ts): Phase 10 moved every
+ * merchant screen out of the web console into the standalone merchant app, so the
+ * shopkeeper's UI is covered by merchant-app/e2e now, and this test proves the
+ * three still compose over one shared order.
  *
- * Prerequisites: API :3000, expo web :8081, dashboard :5173, database seeded.
+ * Prerequisites: API :3000, expo web :8081, admin console :5173, DB seeded.
  */
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import {
+  addProductByCategoryName,
+  assignDelivery,
+  confirmOrder,
+  loginMerchant,
+  newestOrderId,
+  registerShop,
+  startPreparing,
+  updateDelivery,
+} from "./merchant-api";
 
 const DASHBOARD = "http://localhost:5173";
 const ADMIN_PHONE = "0799999999";
@@ -35,13 +47,13 @@ const SHOP_NAME = `[TEST] Lifecycle Shop ${RUN}`;
 const CATEGORY_NAME = `ZZ Lifecycle ${RUN}`;
 const PRODUCT_NAME = `Lifecycle Item ${RUN}`;
 
-/** The dashboard and admin panel are laptop apps. */
+/** The admin console is a laptop app. */
 async function openDesktop(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   return context.newPage();
 }
 
-/** Signs into the web app (merchant or admin) through the UI. */
+/** Signs into the admin web console through the UI. */
 async function signInWeb(page: Page, phone: string) {
   await page.goto(`${DASHBOARD}/`);
   await page.getByLabel("Phone number").fill(phone);
@@ -57,7 +69,7 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   test.setTimeout(180_000);
 
   // ---------------------------------------------------------------------
-  // 1. ADMIN adds a master category
+  // 1. ADMIN adds a master category (web console UI)
   // ---------------------------------------------------------------------
   const admin = await openDesktop(browser);
   await signInWeb(admin, ADMIN_PHONE);
@@ -71,37 +83,28 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   ).toHaveCount(1);
 
   // ---------------------------------------------------------------------
-  // 2. MERCHANT registers — and is invisible to customers until approved
+  // 2. MERCHANT registers (API) — and is invisible to customers until approved
   // ---------------------------------------------------------------------
-  const merchant = await openDesktop(browser);
   const mPhone = merchantPhone();
-
-  await merchant.goto(`${DASHBOARD}/`);
-  await merchant.getByRole("button", { name: "New shop? Register here" }).click();
-  await merchant.getByLabel("Shop name").fill(SHOP_NAME);
-  await merchant.getByLabel("Phone number").fill(mPhone);
-  await merchant.getByRole("button", { name: "Register shop" }).click();
-  await expect(merchant.getByText("Shop registered. Now sign in")).toBeVisible();
-
-  await merchant.getByLabel("Phone number").fill(mPhone);
-  await merchant.getByRole("button", { name: "Send login code" }).click();
-  await expect(merchant.getByText(/Development mode: your code is/)).toBeVisible({
-    timeout: 20_000,
+  await registerShop({
+    phoneNumber: mPhone,
+    shopName: SHOP_NAME,
+    locationLat: 31.9539,
+    locationLng: 35.9106,
+    openingHours: "09:00-22:00",
   });
-  await merchant.getByRole("button", { name: "Sign in" }).click();
-  await expect(merchant.getByTestId("tab-orders")).toBeVisible({ timeout: 20_000 });
 
-  // The shop can stock up while it waits.
-  await merchant.getByTestId("tab-products").click();
-  await expect(merchant.getByText("Your shop is awaiting admin approval")).toBeVisible();
-  await merchant.getByLabel("Product name").fill(PRODUCT_NAME);
-  await merchant.getByLabel("Price (JOD)").fill("0.50");
-  await merchant.getByLabel("Category").selectOption({ label: CATEGORY_NAME });
-  await merchant.getByRole("button", { name: "Add product" }).click();
-  await expect(merchant.getByTestId("product-row")).toHaveCount(1);
+  // The shop can stock up while it waits for approval.
+  const shop = await loginMerchant(mPhone);
+  await addProductByCategoryName(shop, {
+    name: PRODUCT_NAME,
+    price: 0.5,
+    categoryName: CATEGORY_NAME,
+  });
+  await shop.dispose();
 
   // ---------------------------------------------------------------------
-  // 3. ADMIN approves the shop
+  // 3. ADMIN approves the shop (web console UI)
   // ---------------------------------------------------------------------
   await admin.getByTestId("admin-tab-merchants").click();
   await expect(admin.getByTestId(`merchant-status-${SHOP_NAME}`)).toHaveText("Awaiting approval");
@@ -124,7 +127,7 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   ).toBeVisible({ timeout: 20_000 });
 
   // ---------------------------------------------------------------------
-  // 5. CUSTOMER orders from the PILOT shop
+  // 5. CUSTOMER orders from the PILOT shop (customer app UI)
   // ---------------------------------------------------------------------
   await page.getByTestId("shop-card").filter({ hasText: "Al-Nus Dinar Shop" }).click();
   await expect(page.getByTestId("shop-name")).toBeVisible({ timeout: 20_000 });
@@ -140,21 +143,12 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   await page.getByTestId("order-done").click();
 
   // ---------------------------------------------------------------------
-  // 6. PILOT MERCHANT takes the order
+  // 6. PILOT MERCHANT takes the order (API)
   // ---------------------------------------------------------------------
-  const pilot = await openDesktop(browser);
-  await signInWeb(pilot, "0791234567");
-  await expect(pilot.getByTestId("tab-orders")).toBeVisible({ timeout: 20_000 });
-  await pilot.getByTestId("order-row").first().getByRole("button", { name: "Open" }).click();
-  await expect(pilot.getByTestId("order-detail")).toBeVisible();
-
-  await pilot.getByTestId("confirm-order").click();
-  await expect(pilot.getByTestId("detail-status")).toHaveText("Confirmed");
-  // Contextual contact: the shop can call the customer while working on it.
-  await expect(pilot.getByTestId("call-customer")).toBeVisible();
-
-  await pilot.getByTestId("start-preparing").click();
-  await expect(pilot.getByTestId("detail-status")).toHaveText("Picking items");
+  const pilot = await loginMerchant("0791234567");
+  const orderId = await newestOrderId(pilot);
+  await confirmOrder(pilot, orderId);
+  await startPreparing(pilot, orderId);
 
   // ---------------------------------------------------------------------
   // 7. CUSTOMER can call the shop while it is being prepared
@@ -168,14 +162,11 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   await page.getByTestId("orders-close").click();
 
   // ---------------------------------------------------------------------
-  // 8. MERCHANT sends it out; CUSTOMER can call the driver
+  // 8. MERCHANT sends it out (API); CUSTOMER can call the driver
   // ---------------------------------------------------------------------
-  await pilot.getByTestId("captain-name").fill("Omar Al-Zoubi");
-  await pilot.getByTestId("captain-phone").fill("0791122334");
-  await pilot.getByTestId("assign-delivery").click();
-  await pilot.getByTestId("delivery-to-PICKED_UP").click();
-  await pilot.getByTestId("delivery-to-ON_WAY").click();
-  await expect(pilot.getByTestId("delivery-status")).toHaveText("On the way");
+  await assignDelivery(pilot, orderId, "Omar Al-Zoubi", "0791122334");
+  await updateDelivery(pilot, orderId, "PICKED_UP");
+  await updateDelivery(pilot, orderId, "ON_WAY");
 
   await page.getByTestId("open-orders").click();
   await page.getByTestId("order-row").first().click();
@@ -191,8 +182,8 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   // ---------------------------------------------------------------------
   // 9. Delivered -> CUSTOMER reviews it
   // ---------------------------------------------------------------------
-  await pilot.getByTestId("delivery-to-DELIVERED").click();
-  await expect(pilot.getByTestId("detail-status")).toHaveText("Delivered");
+  await updateDelivery(pilot, orderId, "DELIVERED");
+  await pilot.dispose();
 
   await page.getByTestId("open-orders").click();
   await page.getByTestId("order-row").first().click();
@@ -211,7 +202,7 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   await page.screenshot({ path: "e2e/screenshots/lifecycle-reviewed.png", fullPage: true });
 
   // ---------------------------------------------------------------------
-  // 10. ADMIN sees the finished order and its review
+  // 10. ADMIN sees the finished order and its review (web console UI)
   // ---------------------------------------------------------------------
   await admin.getByTestId("admin-tab-orders").click();
   const adminRow = admin.getByTestId("admin-order-row").first();
@@ -232,6 +223,4 @@ test("the whole lifecycle: admin approves, merchant sells, customer buys and rev
   await admin.screenshot({ path: "e2e/screenshots/lifecycle-admin.png", fullPage: true });
 
   await admin.close();
-  await merchant.close();
-  await pilot.close();
 });

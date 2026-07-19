@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /*
- * start-remote.mjs — run the customer app so a phone reaches it from ANY network.
+ * start-remote.mjs — run the MERCHANT app so a phone reaches it from ANY network.
+ *
+ * Ported verbatim from mobile/scripts/start-remote.mjs (the customer app). The
+ * logic is identical and fully path-relative: APP_DIR is derived from this
+ * script's own location and BACKEND_DIR is its sibling ../backend, so the same
+ * file works unchanged from either app directory.
  *
  * WHY NODE, NOT BASH (this is the whole point):
  *   npm runs scripts through cmd.exe, and on a Windows machine with WSL installed
@@ -24,12 +29,12 @@
  * See docs/MOBILE_CONNECTIVITY.md.
  *
  * RUNNING BOTH APPS AT ONCE (customer + merchant, two phones): this script and
- * merchant-app/scripts/start-remote.mjs are designed to run in parallel. The
- * customer app uses Metro port 8081, the merchant app 8082; each opens its own
- * cloudflared API tunnel and tears down ONLY its own (kills by PID, never by image
- * name), so Ctrl+C on one leaves the other running. Recommended: start the shared
- * backend yourself first — `npm run start` in backend/ — so NEITHER script owns it
- * and quitting one never takes the other's API down. If you don't, whichever script
+ * mobile/scripts/start-remote.mjs are designed to run in parallel. The merchant
+ * app uses Metro port 8082, the customer app 8081; each opens its own cloudflared
+ * API tunnel and tears down ONLY its own (kills by PID, never by image name), so
+ * Ctrl+C on one leaves the other running. Recommended: start the shared backend
+ * yourself first — `npm run start` in backend/ — so NEITHER script owns it and
+ * quitting one never takes the other's API down. If you don't, whichever script
  * started the backend owns it, and Ctrl+C there stops the API for both.
  */
 import { spawn, execSync } from "node:child_process";
@@ -39,21 +44,21 @@ import { get as httpsGet } from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MOBILE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-const BACKEND_DIR = join(MOBILE_DIR, "..", "backend");
-const CACHE_DIR = join(MOBILE_DIR, ".tunnel");
+const APP_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+const BACKEND_DIR = join(APP_DIR, "..", "backend");
+const CACHE_DIR = join(APP_DIR, ".tunnel");
 const CF = join(CACHE_DIR, "cloudflared.exe");
 const CF_DOWNLOAD =
   "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
 const API_PORT = 3000;
 
-// Metro/Expo port for THIS app. The customer app keeps Metro's default 8081; the
-// merchant app uses 8082. Distinct ports are what let both `start:remote` scripts
-// run at the same time — otherwise the second Expo would collide on 8081 and, worse,
-// each script's freePort() would kill the OTHER app's Metro. Only start:remote uses
-// this; the plain `start`/`web` scripts (which the e2e suite drives on 8081) are
-// untouched.
-const METRO_PORT = 8081;
+// Metro/Expo port for THIS app. The merchant app uses 8082 so it can run at the
+// same time as the customer app (which keeps Metro's default 8081). Distinct ports
+// are what let both `start:remote` scripts run in parallel — otherwise the second
+// Expo would collide on 8081 and each script's freePort() would kill the OTHER
+// app's Metro. Only start:remote uses this; the plain `start`/`web` scripts (which
+// the e2e suite drives on 8081) are untouched.
+const METRO_PORT = 8082;
 
 let cfProc = null;
 let backendProc = null; // set only if THIS script started the backend
@@ -254,8 +259,8 @@ async function main() {
     if (attempt > 1) console.log(`>> ngrok tunnel was slow; retrying Expo (${attempt}/${MAX_TRIES})...`);
     // Clear any stale Metro on OUR port only so `expo start` never hits the "port
     // in use" prompt (which, with no interactive terminal, aborts the dev server).
-    // Scoped to METRO_PORT — freeing 8081 unconditionally would kill the merchant
-    // app's Metro if it happened to share the port.
+    // Scoped to METRO_PORT — freeing 8081 unconditionally would kill the customer
+    // app's Metro.
     const cleared = freePort(METRO_PORT);
     if (cleared) console.log(`(freed a stale process on port ${METRO_PORT})`);
     // Snapshot ngrok BEFORE we spawn Expo, so on failure we kill only the tunnel
@@ -264,7 +269,7 @@ async function main() {
     const started = Date.now();
     await new Promise((resolve) => {
       const expo = spawn("npx", ["expo", "start", "--tunnel", "--port", String(METRO_PORT)], {
-        cwd: MOBILE_DIR,
+        cwd: APP_DIR,
         shell: true,
         stdio: "inherit",
         env: { ...process.env, EXPO_TUNNEL_API_BASE: apiBase },

@@ -25,6 +25,35 @@ export class NotificationsService {
 
   constructor(private readonly push: PushService) {}
 
+  /**
+   * A new order has landed — wake the shopkeeper's phone.
+   *
+   * This is the merchant-side counterpart to the customer notifications below,
+   * and the push half of the merchant new-order alert. The dashboard's SSE
+   * stream only reaches a shopkeeper whose browser tab is open; a shopkeeper
+   * carrying a phone around their shop needs the notification to arrive on a
+   * CLOSED app, which is exactly what PushService.notifyUser does. The
+   * merchant's own device is registered through the same /auth/devices endpoint
+   * the customer app uses — the token identifies the caller, so the same
+   * plumbing serves both roles with no new endpoint.
+   *
+   * Fire-and-forget, like every push here: the order is already committed and
+   * real, and a failure to reach the phone must never roll it back. The SSE
+   * stream and the merchant app's own polling remain the floor under this.
+   */
+  newOrderToMerchant(merchantUserId: string, orderId: string) {
+    this.emit("order.new_to_merchant", merchantUserId, orderId);
+    void this.push
+      .notifyUser(merchantUserId, {
+        title: "New order",
+        body: "A customer just placed an order. Open the app to confirm it.",
+        data: { orderId, kind: "new_order" },
+      })
+      .catch((error) =>
+        this.logger.warn(`New-order push failed for merchant ${merchantUserId}: ${String(error)}`),
+      );
+  }
+
   orderCancelledByMerchant(customerId: string, orderId: string, reason: string) {
     this.emit("order.cancelled_by_merchant", customerId, orderId, reason);
     this.pushToCustomer(customerId, orderId, {
