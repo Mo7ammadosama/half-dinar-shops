@@ -31,6 +31,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import {
   api,
   type DeliveryStatus,
@@ -46,23 +47,6 @@ import { colors, font, radius, shadow, space } from "./theme";
 const POLL_MS = 10_000;
 /** A PENDING order older than this many minutes is flagged as waiting. */
 const URGENT_MINUTES = 5;
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  PENDING: "New — needs confirming",
-  CONFIRMED: "Confirmed",
-  PREPARING: "Picking items",
-  DELIVERING: "Out for delivery",
-  DELIVERED: "Delivered",
-  CANCELLED: "Cancelled",
-};
-
-const DELIVERY_LABEL: Record<DeliveryStatus, string> = {
-  ASSIGNED: "Driver assigned",
-  PICKED_UP: "Driver collected it",
-  ON_WAY: "On the way",
-  DELIVERED: "Delivered",
-  FAILED: "Delivery failed",
-};
 
 const NEXT_DELIVERY_STEPS: Record<DeliveryStatus, DeliveryStatus[]> = {
   ASSIGNED: ["PICKED_UP"],
@@ -86,6 +70,12 @@ function inFilter(status: OrderStatus, filter: OrderFilter): boolean {
 }
 
 export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number) => void }) {
+  const { t } = useTranslation();
+  // Localised status labels. Kept as helpers (not module constants) so they read
+  // in the active language and re-evaluate when it changes.
+  const statusLabel = (s: OrderStatus) => t(`orders.status.${s}`);
+  const deliveryLabel = (s: DeliveryStatus) => t(`orders.delivery.${s}`);
+  const itemsCount = (n: number) => t("orders.itemsCount", { count: n });
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [selected, setSelected] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,7 +169,7 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
 
   async function handleCancel() {
     if (!selected) return;
-    await act(() => api.cancelOrder(selected.id, cancelReason), "Order cancelled — the customer is notified");
+    await act(() => api.cancelOrder(selected.id, cancelReason), t("orders.toastCancelled"));
     setCancelling(false);
     setCancelReason("");
   }
@@ -199,25 +189,33 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
 
         <View style={styles.detailHead}>
           <TouchableOpacity onPress={() => setSelected(null)} testID="close-detail">
-            <Text style={styles.backLink}>‹ Back to orders</Text>
+            <Text style={styles.backLink}>{t("orders.back")}</Text>
           </TouchableOpacity>
           <View style={styles.statusBadge} testID="detail-status">
-            <Text style={styles.statusBadgeText}>{STATUS_LABEL[s.status]}</Text>
+            <Text style={styles.statusBadgeText}>{statusLabel(s.status)}</Text>
           </View>
         </View>
 
         <Text style={styles.detailTitle}>
-          Order {s.customer.phoneNumber ?? `#${s.id.slice(0, 8)}`}
+          {t("orders.orderTitle", { ref: s.customer.phoneNumber ?? `#${s.id.slice(0, 8)}` })}
         </Text>
         <Text style={styles.detailSub} testID="detail-summary">
-          Placed {relativeTime(s.createdAt)} · {s.items.length} item{s.items.length === 1 ? "" : "s"}
-          {s.hasUnavailableItems ? ` · ${s.items.length - confirmedCount} out of stock` : ""}
+          {t("orders.placedSummary", {
+            time: relativeTime(s.createdAt),
+            items: itemsCount(s.items.length),
+          })}
+          {s.hasUnavailableItems
+            ? t("orders.outOfStockSuffix", { count: s.items.length - confirmedCount })
+            : ""}
         </Text>
 
         {s.cancellationReason && (
           <View style={styles.errorBox} testID="detail-cancel-reason">
             <Text style={styles.errorText}>
-              Cancelled by {s.cancelledBy?.toLowerCase()}: {s.cancellationReason}
+              {t("orders.cancelledBy", {
+                by: s.cancelledBy ? t(`orders.by.${s.cancelledBy.toLowerCase()}`) : "",
+                reason: s.cancellationReason,
+              })}
             </Text>
           </View>
         )}
@@ -231,7 +229,9 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
             onPress={() => Linking.openURL(`tel:${s.customer.phoneNumber}`)}
             testID="call-customer"
           >
-            <Text style={styles.callButtonText}>📞 Call the customer · {s.customer.phoneNumber}</Text>
+            <Text style={styles.callButtonText}>
+              {t("orders.callCustomer", { phone: s.customer.phoneNumber })}
+            </Text>
           </TouchableOpacity>
         )}
 
@@ -245,7 +245,11 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                   {item.name}
                 </Text>
                 <Text style={styles.itemMeta}>
-                  {item.quantity} × {item.priceAtOrder} = {item.lineTotal} JOD
+                  {t("orders.itemLine", {
+                    quantity: item.quantity,
+                    price: item.priceAtOrder,
+                    total: item.lineTotal,
+                  })}
                 </Text>
               </View>
               <TouchableOpacity
@@ -260,23 +264,23 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                         item.status === "CONFIRMED" ? "UNAVAILABLE" : "CONFIRMED",
                       ),
                     item.status === "CONFIRMED"
-                      ? `“${item.name}” marked out of stock`
-                      : `“${item.name}” back in`,
+                      ? t("orders.toastItemOut", { name: item.name })
+                      : t("orders.toastItemBack", { name: item.name }),
                   )
                 }
                 testID={`item-toggle-${item.name}`}
               >
                 <Text style={item.status === "CONFIRMED" ? styles.pillOnText : styles.pillOffText}>
-                  {item.status === "CONFIRMED" ? "Got it" : "Out of stock"}
+                  {item.status === "CONFIRMED" ? t("orders.gotIt") : t("orders.outOfStock")}
                 </Text>
               </TouchableOpacity>
             </View>
           ))}
           <Text style={styles.totals} testID="detail-totals">
-            Delivery {s.deliveryFee} JOD · Total {s.totalPrice} JOD
+            {t("orders.totals", { fee: s.deliveryFee, total: s.totalPrice })}
             {s.hasUnavailableItems && (
               <Text testID="detail-revised">
-                {"  "}· Revised {s.revisedTotal} JOD once the customer accepts the removals
+                {t("orders.revised", { revised: s.revisedTotal })}
               </Text>
             )}
           </Text>
@@ -287,20 +291,20 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
             <TouchableOpacity
               style={[styles.button, busy && styles.buttonDisabled]}
               disabled={busy}
-              onPress={() => act(() => api.confirmOrder(s.id), "Order confirmed")}
+              onPress={() => act(() => api.confirmOrder(s.id), t("orders.toastConfirmed"))}
               testID="confirm-order"
             >
-              <Text style={styles.buttonText}>Confirm order</Text>
+              <Text style={styles.buttonText}>{t("orders.confirmOrder")}</Text>
             </TouchableOpacity>
           )}
           {s.status === "CONFIRMED" && (
             <TouchableOpacity
               style={[styles.button, busy && styles.buttonDisabled]}
               disabled={busy}
-              onPress={() => act(() => api.startPreparing(s.id), "Now picking items")}
+              onPress={() => act(() => api.startPreparing(s.id), t("orders.toastPicking"))}
               testID="start-preparing"
             >
-              <Text style={styles.buttonText}>Start picking</Text>
+              <Text style={styles.buttonText}>{t("orders.startPicking")}</Text>
             </TouchableOpacity>
           )}
           {["CONFIRMED", "PREPARING"].includes(s.status) && !cancelling && (
@@ -310,19 +314,19 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
               onPress={() => setCancelling(true)}
               testID="cancel-order"
             >
-              <Text style={styles.dangerButtonText}>Cancel order</Text>
+              <Text style={styles.dangerButtonText}>{t("orders.cancelOrder")}</Text>
             </TouchableOpacity>
           )}
         </View>
 
         {cancelling && (
           <View style={styles.card} testID="cancel-box">
-            <Text style={styles.label}>Why are you cancelling? The customer will see this.</Text>
+            <Text style={styles.label}>{t("orders.cancelPrompt")}</Text>
             <TextInput
               style={styles.input}
               value={cancelReason}
               onChangeText={setCancelReason}
-              placeholder="e.g. We are closing early today"
+              placeholder={t("orders.cancelPlaceholder")}
               placeholderTextColor={colors.faint}
               testID="cancel-reason"
             />
@@ -333,7 +337,7 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                 onPress={handleCancel}
                 testID="confirm-cancel"
               >
-                <Text style={styles.dangerButtonText}>Cancel this order</Text>
+                <Text style={styles.dangerButtonText}>{t("orders.confirmCancel")}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.ghostButton}
@@ -343,7 +347,7 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                 }}
                 testID="abort-cancel"
               >
-                <Text style={styles.ghostButtonText}>Keep the order</Text>
+                <Text style={styles.ghostButtonText}>{t("orders.keepOrder")}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -352,9 +356,9 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
         {/* Delivery — entered by hand; there is no captain app yet. */}
         {s.canAssignDelivery && (
           <View style={styles.card} testID="assign-delivery-box">
-            <Text style={styles.cardTitle}>Send it out</Text>
-            <Text style={styles.muted}>Type in who is taking it. The customer sees their name and number.</Text>
-            <Text style={styles.label}>Driver's name</Text>
+            <Text style={styles.cardTitle}>{t("orders.sendOut")}</Text>
+            <Text style={styles.muted}>{t("orders.sendOutHint")}</Text>
+            <Text style={styles.label}>{t("orders.driverName")}</Text>
             <TextInput
               style={styles.input}
               value={captainName}
@@ -363,7 +367,7 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
               placeholderTextColor={colors.faint}
               testID="captain-name"
             />
-            <Text style={styles.label}>Driver's phone</Text>
+            <Text style={styles.label}>{t("orders.driverPhone")}</Text>
             <TextInput
               style={styles.input}
               value={captainPhone}
@@ -381,20 +385,23 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
               ]}
               disabled={busy || captainName.trim().length < 2 || captainPhone.trim().length < 9}
               onPress={async () => {
-                await act(() => api.assignDelivery(s.id, captainName, captainPhone), "Driver assigned");
+                await act(
+                  () => api.assignDelivery(s.id, captainName, captainPhone),
+                  t("orders.toastDriverAssigned"),
+                );
                 setCaptainName("");
                 setCaptainPhone("");
               }}
               testID="assign-delivery"
             >
-              <Text style={styles.buttonText}>Assign driver</Text>
+              <Text style={styles.buttonText}>{t("orders.assignDriver")}</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {s.delivery && (
           <View style={styles.card} testID="delivery-box">
-            <Text style={styles.cardTitle}>Delivery</Text>
+            <Text style={styles.cardTitle}>{t("orders.deliveryTitle")}</Text>
             <Text style={styles.itemName} testID="delivery-captain">
               {s.delivery.captainName}
             </Text>
@@ -405,7 +412,7 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
               <Text style={styles.linkAction}>{s.delivery.captainPhone}</Text>
             </TouchableOpacity>
             <View style={styles.statusBadge} testID="delivery-status">
-              <Text style={styles.statusBadgeText}>{DELIVERY_LABEL[s.delivery.status]}</Text>
+              <Text style={styles.statusBadgeText}>{deliveryLabel(s.delivery.status)}</Text>
             </View>
 
             <View style={styles.actionsCol}>
@@ -414,10 +421,17 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                   key={next}
                   style={[styles.button, busy && styles.buttonDisabled]}
                   disabled={busy}
-                  onPress={() => act(() => api.updateDelivery(s.id, next), `Marked ${DELIVERY_LABEL[next].toLowerCase()}`)}
+                  onPress={() =>
+                    act(
+                      () => api.updateDelivery(s.id, next),
+                      t("orders.toastMarked", { status: deliveryLabel(next).toLowerCase() }),
+                    )
+                  }
                   testID={`delivery-to-${next}`}
                 >
-                  <Text style={styles.buttonText}>Mark {DELIVERY_LABEL[next].toLowerCase()}</Text>
+                  <Text style={styles.buttonText}>
+                    {t("orders.markStatus", { status: deliveryLabel(next).toLowerCase() })}
+                  </Text>
                 </TouchableOpacity>
               ))}
               {!["DELIVERED", "FAILED"].includes(s.delivery.status) && !failing && (
@@ -427,21 +441,19 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                   onPress={() => setFailing(true)}
                   testID="delivery-fail"
                 >
-                  <Text style={styles.dangerButtonText}>Delivery failed</Text>
+                  <Text style={styles.dangerButtonText}>{t("orders.deliveryFailed")}</Text>
                 </TouchableOpacity>
               )}
             </View>
 
             {failing && (
               <View testID="fail-box">
-                <Text style={styles.label}>
-                  What went wrong? This cancels the order and the customer is told why.
-                </Text>
+                <Text style={styles.label}>{t("orders.failPrompt")}</Text>
                 <TextInput
                   style={styles.input}
                   value={failNote}
                   onChangeText={setFailNote}
-                  placeholder="e.g. Customer did not answer the door"
+                  placeholder={t("orders.failPlaceholder")}
                   placeholderTextColor={colors.faint}
                   testID="fail-note"
                 />
@@ -450,13 +462,16 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                     style={[styles.dangerButton, (busy || failNote.trim().length < 3) && styles.buttonDisabled]}
                     disabled={busy || failNote.trim().length < 3}
                     onPress={async () => {
-                      await act(() => api.updateDelivery(s.id, "FAILED", failNote), "Delivery marked failed");
+                      await act(
+                        () => api.updateDelivery(s.id, "FAILED", failNote),
+                        t("orders.toastDeliveryFailed"),
+                      );
                       setFailing(false);
                       setFailNote("");
                     }}
                     testID="confirm-fail"
                   >
-                    <Text style={styles.dangerButtonText}>Mark delivery failed</Text>
+                    <Text style={styles.dangerButtonText}>{t("orders.markDeliveryFailed")}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.ghostButton}
@@ -466,7 +481,7 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                     }}
                     testID="abort-fail"
                   >
-                    <Text style={styles.ghostButtonText}>Never mind</Text>
+                    <Text style={styles.ghostButtonText}>{t("orders.neverMind")}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -496,10 +511,12 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
 
         <View style={styles.listHead}>
           <Text style={styles.syncText} testID="last-updated">
-            {lastSync ? `Updated ${relativeTime(new Date(lastSync).toISOString())}` : "Loading…"}
+            {lastSync
+              ? t("orders.updatedAt", { time: relativeTime(new Date(lastSync).toISOString()) })
+              : t("orders.loading")}
           </Text>
           <TouchableOpacity onPress={onRefresh} testID="refresh-orders">
-            <Text style={styles.refreshLink}>↻ Refresh</Text>
+            <Text style={styles.refreshLink}>{t("orders.refresh")}</Text>
           </TouchableOpacity>
         </View>
 
@@ -508,20 +525,20 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
           value={filter}
           onChange={setFilter}
           options={[
-            { value: "all", label: "All", count: counts.all },
-            { value: "new", label: "New", count: counts.new },
-            { value: "active", label: "Active", count: counts.active },
-            { value: "done", label: "Done", count: counts.done },
+            { value: "all", label: t("orders.filter.all"), count: counts.all },
+            { value: "new", label: t("orders.filter.new"), count: counts.new },
+            { value: "active", label: t("orders.filter.active"), count: counts.active },
+            { value: "done", label: t("orders.filter.done"), count: counts.done },
           ]}
         />
 
         {orders.length === 0 ? (
           <Text style={styles.emptyText} testID="no-orders">
-            No orders yet.
+            {t("orders.noOrders")}
           </Text>
         ) : visibleOrders.length === 0 ? (
           <Text style={styles.emptyText} testID="no-orders-filtered">
-            No {filter} orders right now.
+            {t("orders.noneFiltered", { filter: t(`orders.filter.${filter}`) })}
           </Text>
         ) : (
           visibleOrders.map((o) => {
@@ -540,20 +557,24 @@ export function OrdersScreen({ onPendingChange }: { onPendingChange?: (n: number
                     style={[styles.statusBadge, o.status === "PENDING" && styles.statusBadgeNew]}
                     testID="order-status"
                   >
-                    <Text style={styles.statusBadgeText}>{STATUS_LABEL[o.status]}</Text>
+                    <Text style={styles.statusBadgeText}>{statusLabel(o.status)}</Text>
                   </View>
                 </View>
                 <Text style={styles.orderMeta}>
-                  {o.customerPhone ?? "—"} · {o.itemCount} item{o.itemCount === 1 ? "" : "s"} · {o.totalPrice} JOD
+                  {t("orders.rowMeta", {
+                    phone: o.customerPhone ?? "—",
+                    items: itemsCount(o.itemCount),
+                    total: o.totalPrice,
+                  })}
                 </Text>
                 {urgent && (
                   <Text style={styles.waiting} testID="order-waiting">
-                    ⏳ Waiting {waitingMins} min — please confirm
+                    {t("orders.waiting", { count: waitingMins })}
                   </Text>
                 )}
                 {o.unavailableCount > 0 && (
                   <Text style={styles.unavailable} testID="row-unavailable">
-                    {o.unavailableCount} out of stock
+                    {t("orders.rowUnavailable", { count: o.unavailableCount })}
                   </Text>
                 )}
               </TouchableOpacity>

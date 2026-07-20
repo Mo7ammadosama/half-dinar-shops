@@ -73,12 +73,22 @@ export async function registerForPush(): Promise<PushRegistration> {
     if (!granted) return { status: "denied" };
 
     // Android needs a channel or notifications arrive silently — which for an
-    // order update is the same as not arriving at all.
+    // order update is the same as not arriving at all. On Android 8+ the SOUND
+    // is a property of the CHANNEL, not the push payload, so the channel must
+    // explicitly enable it. HIGH makes a sound and a heads-up notification.
+    //
+    // The channel id is "orders-v2", NOT "orders": Android channels are
+    // immutable once created, so reusing the old soundless "orders" id would
+    // leave already-installed phones silent forever. A fresh id is created with
+    // sound on. Must stay in step with ORDER_PUSH_CHANNEL_ID on the server.
     if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("orders", {
+      await Notifications.setNotificationChannelAsync("orders-v2", {
         name: "Order updates",
         importance: Notifications.AndroidImportance.HIGH,
+        sound: "default",
         vibrationPattern: [0, 250, 250, 250],
+        enableVibrate: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
 

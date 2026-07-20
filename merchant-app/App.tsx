@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { api, setAuthToken, type MerchantProfile } from "./src/api";
 import { ErrorBoundary } from "./src/ErrorBoundary";
 import { LoginScreen } from "./src/LoginScreen";
@@ -17,11 +18,15 @@ import { ProductsScreen } from "./src/ProductsScreen";
 // its functions and only imports Platform + api at module scope.
 import { registerForPush, unregisterFromPush } from "./src/push";
 import { clearToken, loadToken, saveToken } from "./src/storage";
+// Initialises i18next as a side effect, and exposes the startup restore.
+import { restoreLanguage } from "./src/i18n";
+import { LanguageToggle } from "./src/i18n/LanguageToggle";
 import { colors, font, radius, shadow, space } from "./src/theme";
 
 type Tab = "orders" | "products";
 
 export default function App() {
+  const { t } = useTranslation();
   // undefined = still restoring; null = signed out.
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [role, setRole] = useState<string | null>(null);
@@ -34,6 +39,9 @@ export default function App() {
   // token is still a valid MERCHANT token.
   useEffect(() => {
     void (async () => {
+      // Restore the saved language BEFORE the first screen renders, so it never
+      // flashes the default. The splash below covers this (token === undefined).
+      await restoreLanguage();
       const saved = await loadToken();
       setAuthToken(saved);
       setToken(saved);
@@ -111,14 +119,13 @@ export default function App() {
     return (
       <ErrorBoundary>
         <SafeAreaView style={styles.wrongApp}>
-          <Text style={styles.wrongAppTitle}>This app is for shop owners</Text>
-          <Text style={styles.wrongAppBody}>
-            This phone number is not registered as a shop. If you run a shop, sign out and tap
-            “New shop? Register here” on the sign-in screen. Customers should use the Half-Dinar
-            Shops customer app instead.
-          </Text>
+          <View style={styles.wrongAppToggle}>
+            <LanguageToggle />
+          </View>
+          <Text style={styles.wrongAppTitle}>{t("app.wrongAppTitle")}</Text>
+          <Text style={styles.wrongAppBody}>{t("app.wrongAppBody")}</Text>
           <TouchableOpacity style={styles.button} onPress={signOut} testID="wrong-app-signout">
-            <Text style={styles.buttonText}>Sign out</Text>
+            <Text style={styles.buttonText}>{t("app.signOut")}</Text>
           </TouchableOpacity>
         </SafeAreaView>
         <StatusBar style="dark" />
@@ -132,25 +139,28 @@ export default function App() {
         <View style={styles.header}>
           <View style={styles.headerText}>
             <Text style={styles.brand} testID="merchant-header">
-              {profile?.shopName ?? "Half-Dinar Merchant"}
+              {profile?.shopName ?? t("app.fallbackName")}
             </Text>
             {profile && (
               <Text style={styles.headerMeta}>
-                {profile.productCount} products · {profile.status}
+                {t("app.headerMeta", {
+                  count: profile.productCount,
+                  status: t(`app.status.${profile.status}`, profile.status),
+                })}
               </Text>
             )}
           </View>
-          <TouchableOpacity onPress={signOut} testID="sign-out">
-            <Text style={styles.signOut}>Sign out</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <LanguageToggle onDark />
+            <TouchableOpacity onPress={signOut} testID="sign-out">
+              <Text style={styles.signOut}>{t("app.signOut")}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {profile?.status === "PENDING" && (
           <View style={styles.pendingBanner} testID="pending-approval">
-            <Text style={styles.pendingBannerText}>
-              Your shop is awaiting admin approval. Build your product list now — customers see it once
-              you are approved.
-            </Text>
+            <Text style={styles.pendingBannerText}>{t("app.pendingBanner")}</Text>
           </View>
         )}
 
@@ -160,7 +170,9 @@ export default function App() {
             onPress={() => setTab("orders")}
             testID="tab-orders"
           >
-            <Text style={[styles.tabText, tab === "orders" && styles.tabTextActive]}>Orders</Text>
+            <Text style={[styles.tabText, tab === "orders" && styles.tabTextActive]}>
+              {t("app.tabOrders")}
+            </Text>
             {pending > 0 && (
               <View style={styles.badge} testID="pending-badge">
                 <Text style={styles.badgeText}>{pending}</Text>
@@ -172,7 +184,9 @@ export default function App() {
             onPress={() => setTab("products")}
             testID="tab-products"
           >
-            <Text style={[styles.tabText, tab === "products" && styles.tabTextActive]}>Products</Text>
+            <Text style={[styles.tabText, tab === "products" && styles.tabTextActive]}>
+              {t("app.tabProducts")}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -207,6 +221,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   headerText: { flex: 1 },
+  headerActions: { alignItems: "flex-end", gap: space.sm },
   brand: { ...font.h1, color: colors.card },
   headerMeta: { ...font.small, color: colors.brandBorder, marginTop: 2 },
   signOut: { ...font.bodyStrong, color: colors.card },
@@ -244,6 +259,7 @@ const styles = StyleSheet.create({
     padding: space.xl,
     justifyContent: "center",
   },
+  wrongAppToggle: { alignItems: "center", marginBottom: space.xl },
   wrongAppTitle: { ...font.h1, color: colors.ink, marginBottom: space.md, textAlign: "center" },
   wrongAppBody: { ...font.body, color: colors.muted, textAlign: "center", marginBottom: space.xl },
   button: { backgroundColor: colors.brand, borderRadius: radius.sm, paddingVertical: 14, alignItems: "center" },

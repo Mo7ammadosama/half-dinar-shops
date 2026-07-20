@@ -1,0 +1,100 @@
+{
+  "lang": {
+    "toggleA11y": "Switch language",
+    "ar": "عربي",
+    "en": "EN"
+  },
+  "brand": {
+    "name": "Half-Dinar",
+    "accent": "Shops"
+  },
+  "login": {
+    "adminConsole": "Admin console",
+    "phoneNumber": "Phone number",
+    "sendCode": "Send login code",
+    "sending": "Sending...",
+    "codeSent": "We sent a code to your phone.",
+    "devCode": "Development mode: your code is {{code}}",
+    "codeLabel": "6-digit code",
+    "signIn": "Sign in",
+    "verifying": "Verifying...",
+    "differentNumber": "Use a different number"
+  },
+  "app": {
+    "adminConsole": "Admin console",
+    "notAdmin": "This console is for administrators only. If you run a shop, use the Half-Dinar Merchant app on your phone.",
+    "signOut": "Sign out",
+    "adminPanel": "Admin panel"
+  },
+  "admin": {
+    "status": {
+      "PENDING": "Awaiting approval",
+      "APPROVED": "Approved",
+      "SUSPENDED": "Suspended"
+    },
+    "orderStatus": {
+      "PENDING": "PENDING",
+      "CONFIRMED": "CONFIRMED",
+      "PREPARING": "PREPARING",
+      "DELIVERING": "DELIVERING",
+      "DELIVERED": "DELIVERED",
+      "CANCELLED": "CANCELLED"
+    },
+    "by": {
+      "merchant": "merchant",
+      "customer": "customer",
+      "system": "system"
+    },
+    "overview": "Overview",
+    "statsAwaiting": "shop(s) awaiting approval",
+    "statsApproved": "approved",
+    "statsOrders": "orders",
+    "statsCancelled": "cancelled",
+    "statsDelivered": "delivered",
+    "statsFrom": "from",
+    "statsReviews": "review(s)",
+    "tabShops": "Shops",
+    "tabCategories": "Categories",
+    "tabOrders": "All orders",
+    "tabIgnored": "Not responded to",
+    "shops": "Shops",
+    "noShops": "No shops registered yet.",
+    "thShop": "Shop",
+    "thPhone": "Phone",
+    "thProducts": "Products",
+    "thOrders": "Orders",
+    "thStatus": "Status",
+    "approve": "Approve",
+    "reject": "Reject",
+    "suspend": "Suspend",
+    "masterCategories": "Master categories",
+    "masterCategoriesSub": "Shared by every shop. Merchants choose from this list but cannot change it.",
+    "newCategory": "New category",
+    "newCategoryPlaceholder": "e.g. Baby Care",
+    "inside": "Inside",
+    "topLevel": "Top level",
+    "addCategory": "Add category",
+    "thCategory": "Category",
+    "thSubcategories": "Subcategories",
+    "rename": "Rename",
+    "delete": "Delete",
+    "renamePrompt": "Rename \"{{name}}\" to:",
+    "deleteConfirm": "Delete \"{{path}}\"?",
+    "ignoredTitle": "Orders the shop has not responded to",
+    "ignoredEmpty": "Nothing waiting. Every order has been picked up by its shop.",
+    "ignoredWarning": "These customers are waiting and the shop has not acknowledged their order. Call the shop. The customer can cancel free of charge.",
+    "thWaiting": "Waiting",
+    "thCallShop": "Call the shop",
+    "thCustomer": "Customer",
+    "thItems": "Items",
+    "thTotal": "Total",
+    "allOrders": "All orders",
+    "cancellationsOnly": "Cancellations only",
+    "noOrders": "No orders to show.",
+    "thPlaced": "Placed",
+    "thNotes": "Notes",
+    "jod": "{{value}} JOD",
+    "waitingMin": "{{count}} min",
+    "waitingHm": "{{h}}h {{m}}m"
+  }
+}

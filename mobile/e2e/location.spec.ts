@@ -12,6 +12,7 @@
  * Run with: npm run test:e2e
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const SEEDED_CUSTOMER = "0791111111";
 
@@ -32,6 +33,8 @@ async function enterPilot(page: Page) {
   await page.getByTestId("shop-card").filter({ hasText: "Al-Nus Dinar Shop" }).click();
   await expect(page.getByTestId("shop-name")).toBeVisible({ timeout: 15_000 });
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test.describe("Location granted", () => {
   // Amman, ~2km from the pilot shop at 31.9539, 35.9106.

@@ -17,6 +17,7 @@
  * Prerequisites: API :3000, expo web :8081, admin console :5173, DB seeded.
  */
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 import {
   addProductByCategoryName,
   assignDelivery,
@@ -50,7 +51,17 @@ const PRODUCT_NAME = `Lifecycle Item ${RUN}`;
 /** The admin console is a laptop app. */
 async function openDesktop(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  return context.newPage();
+  const page = await context.newPage();
+  // The admin console (a SEPARATE context) also defaults to Arabic; this test
+  // asserts English chrome, so pin its own language key before it loads.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem("halfdinar.admin.lang", "en");
+    } catch {
+      /* falls back to default */
+    }
+  });
+  return page;
 }
 
 /** Signs into the admin web console through the UI. */
@@ -61,6 +72,8 @@ async function signInWeb(page: Page, phone: string) {
   await expect(page.getByText(/Development mode: your code is/)).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "Sign in" }).click();
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test("the whole lifecycle: admin approves, merchant sells, customer buys and reviews", async ({
   page,

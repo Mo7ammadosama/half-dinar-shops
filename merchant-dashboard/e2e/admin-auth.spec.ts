@@ -15,6 +15,7 @@
  * :5173, database seeded.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const ADMIN = "0799999999";
 const MERCHANT = "0791234567";
@@ -29,6 +30,8 @@ async function signIn(page: Page, phone: string) {
 }
 
 test.describe("Admin console auth", () => {
+  test.beforeEach(async ({ page }) => forceEnglish(page));
+
   test("a seeded admin signs in and sees the admin panel", async ({ page }) => {
     await signIn(page, ADMIN);
     await expect(page.getByTestId("admin-header")).toBeVisible();

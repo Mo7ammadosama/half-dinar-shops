@@ -21,7 +21,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { api, type Shop } from "./api";
+import { LanguageToggle } from "./i18n/LanguageToggle";
 import {
   distanceKm,
   MANUAL_AREAS,
@@ -51,6 +53,7 @@ export function ShopsScreen({
   savedArea: string | null;
   onAreaChosen: (area: string) => void;
 }) {
+  const { t } = useTranslation();
   const [shops, setShops] = useState<Shop[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -128,8 +131,8 @@ export function ShopsScreen({
 
   function placeLabel(): string {
     if (place.kind === "area") return place.area;
-    if (place.kind === "gps") return "Your location";
-    return "Set delivery location";
+    if (place.kind === "gps") return t("shops.yourLocation");
+    return t("shops.setDeliveryLocation");
   }
 
   return (
@@ -138,19 +141,20 @@ export function ShopsScreen({
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.brand}>
-            Half-Dinar <Text style={styles.brandAccent}>Shops</Text>
+            {t("login.brand")} <Text style={styles.brandAccent}>{t("login.brandAccent")}</Text>
           </Text>
           <View style={styles.headerActions}>
+            <LanguageToggle onDark />
             <TouchableOpacity onPress={() => setOrdersOpen(true)} testID="open-orders">
-              <Text style={styles.headerLink}>My orders</Text>
+              <Text style={styles.headerLink}>{t("shops.myOrders")}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={onSignOut} testID="sign-out">
-              <Text style={styles.signOut}>Sign out</Text>
+              <Text style={styles.signOut}>{t("shops.signOut")}</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        <Text style={styles.tagline}>Everyday shops near you · pay on delivery</Text>
+        <Text style={styles.tagline}>{t("shops.tagline")}</Text>
 
         <TouchableOpacity
           style={styles.placeRow}
@@ -161,9 +165,9 @@ export function ShopsScreen({
         >
           <Text style={styles.placePin}>📍</Text>
           <Text style={styles.placeText} testID="place-label" numberOfLines={1}>
-            {locationBusy ? "Finding you…" : placeLabel()}
+            {locationBusy ? t("shops.findingYou") : placeLabel()}
           </Text>
-          <Text style={styles.placeChange}>{hasLocation ? "Change" : "Set"}</Text>
+          <Text style={styles.placeChange}>{hasLocation ? t("shops.change") : t("shops.set")}</Text>
         </TouchableOpacity>
       </View>
 
@@ -171,7 +175,7 @@ export function ShopsScreen({
         <View style={styles.errorBanner} testID="shops-error">
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity onPress={handleRefresh}>
-            <Text style={styles.retry}>Retry</Text>
+            <Text style={styles.retry}>{t("common.retry")}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -179,15 +183,13 @@ export function ShopsScreen({
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.brand} />
-          <Text style={styles.loadingText}>Finding shops…</Text>
+          <Text style={styles.loadingText}>{t("shops.findingShops")}</Text>
         </View>
       ) : shops.length === 0 ? (
         <View style={styles.centered} testID="no-shop">
           <Text style={styles.emptyEmoji}>🛍️</Text>
-          <Text style={styles.emptyTitle}>No shops open yet</Text>
-          <Text style={styles.emptyBody}>
-            We're adding shops in your area. Please check back soon.
-          </Text>
+          <Text style={styles.emptyTitle}>{t("shops.noShopsTitle")}</Text>
+          <Text style={styles.emptyBody}>{t("shops.noShopsBody")}</Text>
         </View>
       ) : (
         <FlatList
@@ -198,12 +200,12 @@ export function ShopsScreen({
           ListHeaderComponent={
             <View style={styles.listHeadRow}>
               <Text style={styles.listHead}>
-                {shops.length} {shops.length === 1 ? "shop" : "shops"}
-                {hasLocation ? " · nearest first" : ""}
+                {shops.length === 1
+                  ? t("shops.countOne", { count: shops.length })
+                  : t("shops.countOther", { count: shops.length })}
+                {hasLocation ? t("shops.nearestFirst") : ""}
               </Text>
-              {!hasLocation && (
-                <Text style={styles.listHint}>Set your location to sort by distance</Text>
-              )}
+              {!hasLocation && <Text style={styles.listHint}>{t("shops.sortHint")}</Text>}
             </View>
           }
           renderItem={({ item }) => (
@@ -222,12 +224,12 @@ export function ShopsScreen({
                   {item.shopName}
                 </Text>
                 <Text style={styles.shopMeta} numberOfLines={1}>
-                  Open {item.openingHours} · {item.productCount} items
+                  {t("shops.shopMeta", { hours: item.openingHours, count: item.productCount })}
                 </Text>
                 {item.distance !== null && (
                   <View style={styles.distancePill}>
                     <Text style={styles.distanceText} testID="shop-distance">
-                      {item.distance.toFixed(1)} km away
+                      {t("shops.distanceAway", { km: item.distance.toFixed(1) })}
                     </Text>
                   </View>
                 )}
@@ -251,10 +253,8 @@ export function ShopsScreen({
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Choose your area</Text>
-            <Text style={styles.modalBody}>
-              We couldn't use your location, so pick the area you'd like delivery to.
-            </Text>
+            <Text style={styles.modalTitle}>{t("shops.chooseArea")}</Text>
+            <Text style={styles.modalBody}>{t("shops.chooseAreaBody")}</Text>
 
             <ScrollView style={styles.areaList}>
               {MANUAL_AREAS.map((area) => (
@@ -275,7 +275,7 @@ export function ShopsScreen({
               onPress={() => setAreaPickerOpen(false)}
               testID="area-cancel"
             >
-              <Text style={styles.modalCloseText}>Not now</Text>
+              <Text style={styles.modalCloseText}>{t("shops.notNow")}</Text>
             </TouchableOpacity>
           </View>
         </View>

@@ -17,6 +17,23 @@ export interface PushMessage {
   body: string;
   /** Small payload the app reads on tap — e.g. which order to open. */
   data?: Record<string, string>;
+  /**
+   * Android notification-channel id to deliver through.
+   *
+   * On Android 8+ the SOUND, importance and heads-up behaviour of a notification
+   * are properties of the CHANNEL, not the push payload. Without a channelId,
+   * Expo delivers through its silent fallback channel and the payload `sound`
+   * is effectively ignored — which is exactly why new-order notifications were
+   * arriving silently. The app creates a matching high-importance channel with
+   * a sound (see each app's src/push.ts). Ignored on iOS.
+   */
+  channelId?: string;
+  /**
+   * Sound to play. "default" plays the device's default notification sound.
+   * Drives iOS directly, and Android via the matching channel. Defaults to
+   * "default" in the sender — a new order must never be silent.
+   */
+  sound?: string;
 }
 
 export interface PushSendResult {

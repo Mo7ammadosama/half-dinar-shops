@@ -12,6 +12,7 @@
  * Run with: npm run test:e2e
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const API = "http://localhost:3000/api";
 const ADMIN_PHONE = "0799999999";
@@ -89,6 +90,8 @@ test.describe("Admin escalation queue", () => {
   // for it rather than reloading — "the admin notices without going looking" is
   // the property under test, and a reload would fake it.
   test.setTimeout(60_000);
+
+  test.beforeEach(async ({ page }) => forceEnglish(page));
 
   test.beforeEach(async () => {
     await confirmAllPending();

@@ -7,6 +7,7 @@
  * regardless of what this component renders.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   api,
   type AdminCategory,
@@ -14,26 +15,21 @@ import {
   type AdminOrder,
   type AdminStats,
   type IgnoredOrder,
-  type MerchantStatus,
 } from "./api";
 
 type Section = "merchants" | "categories" | "orders" | "ignored";
 
-const MERCHANT_STATUS_LABEL: Record<MerchantStatus, string> = {
-  PENDING: "Awaiting approval",
-  APPROVED: "Approved",
-  SUSPENDED: "Suspended",
-};
-
-/** "8 minutes" reads faster than "487 seconds" when someone is waiting. */
-function formatWaiting(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
-}
-
 export function Admin() {
+  const { t } = useTranslation();
+
+  /** "8 minutes" reads faster than "487 seconds" when someone is waiting. */
+  function formatWaiting(seconds: number): string {
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return t("admin.waitingMin", { count: minutes });
+    const hours = Math.floor(minutes / 60);
+    return t("admin.waitingHm", { h: hours, m: minutes % 60 });
+  }
+
   const [section, setSection] = useState<Section>("merchants");
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,18 +120,19 @@ export function Admin() {
     <div>
       {stats && (
         <section className="card" data-testid="admin-stats">
-          <h2>Overview</h2>
+          <h2>{t("admin.overview")}</h2>
           <p className="muted">
-            <strong data-testid="stat-pending">{stats.pendingMerchants}</strong> shop(s) awaiting
-            approval · <strong>{stats.approvedMerchants}</strong> approved ·{" "}
-            <strong>{stats.totalOrders}</strong> orders ·{" "}
-            <strong data-testid="stat-cancelled">{stats.cancelledOrders}</strong> cancelled ·{" "}
-            <strong>{stats.deliveredOrders}</strong> delivered
+            <strong data-testid="stat-pending">{stats.pendingMerchants}</strong>{" "}
+            {t("admin.statsAwaiting")} · <strong>{stats.approvedMerchants}</strong>{" "}
+            {t("admin.statsApproved")} · <strong>{stats.totalOrders}</strong> {t("admin.statsOrders")}{" "}
+            · <strong data-testid="stat-cancelled">{stats.cancelledOrders}</strong>{" "}
+            {t("admin.statsCancelled")} · <strong>{stats.deliveredOrders}</strong>{" "}
+            {t("admin.statsDelivered")}
             {stats.averageRating && (
               <>
                 {" "}
-                · <strong data-testid="stat-rating">{stats.averageRating}★</strong> from{" "}
-                {stats.reviewCount} review(s)
+                · <strong data-testid="stat-rating">{stats.averageRating}★</strong>{" "}
+                {t("admin.statsFrom")} {stats.reviewCount} {t("admin.statsReviews")}
               </>
             )}
           </p>
@@ -148,7 +145,7 @@ export function Admin() {
           onClick={() => setSection("merchants")}
           data-testid="admin-tab-merchants"
         >
-          Shops
+          {t("admin.tabShops")}
           {stats && stats.pendingMerchants > 0 && (
             <span className="tab-badge">{stats.pendingMerchants}</span>
           )}
@@ -158,14 +155,14 @@ export function Admin() {
           onClick={() => setSection("categories")}
           data-testid="admin-tab-categories"
         >
-          Categories
+          {t("admin.tabCategories")}
         </button>
         <button
           className={`tab ${section === "orders" ? "tab-active" : ""}`}
           onClick={() => setSection("orders")}
           data-testid="admin-tab-orders"
         >
-          All orders
+          {t("admin.tabOrders")}
         </button>
         {/*
           The escalation queue. The badge is always visible, from any section —
@@ -176,7 +173,7 @@ export function Admin() {
           onClick={() => setSection("ignored")}
           data-testid="admin-tab-ignored"
         >
-          Not responded to
+          {t("admin.tabIgnored")}
           {ignored.length > 0 && (
             <span className="tab-badge tab-badge-urgent" data-testid="admin-ignored-badge">
               {ignored.length}
@@ -193,18 +190,18 @@ export function Admin() {
 
       {section === "merchants" && (
         <section className="card">
-          <h2>Shops</h2>
+          <h2>{t("admin.shops")}</h2>
           {merchants.length === 0 ? (
-            <p className="muted empty">No shops registered yet.</p>
+            <p className="muted empty">{t("admin.noShops")}</p>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <th>Shop</th>
-                  <th>Phone</th>
-                  <th>Products</th>
-                  <th>Orders</th>
-                  <th>Status</th>
+                  <th>{t("admin.thShop")}</th>
+                  <th>{t("admin.thPhone")}</th>
+                  <th>{t("admin.thProducts")}</th>
+                  <th>{t("admin.thOrders")}</th>
+                  <th>{t("admin.thStatus")}</th>
                   <th />
                 </tr>
               </thead>
@@ -220,7 +217,7 @@ export function Admin() {
                         className={`badge ${m.status.toLowerCase()}`}
                         data-testid={`merchant-status-${m.shopName}`}
                       >
-                        {MERCHANT_STATUS_LABEL[m.status]}
+                        {t(`admin.status.${m.status}`)}
                       </span>
                     </td>
                     <td className="row-actions">
@@ -230,7 +227,7 @@ export function Admin() {
                           onClick={() => act(() => api.adminSetMerchantStatus(m.id, "APPROVED"))}
                           data-testid={`approve-${m.shopName}`}
                         >
-                          Approve
+                          {t("admin.approve")}
                         </button>
                       )}
                       {m.status !== "SUSPENDED" && (
@@ -240,7 +237,7 @@ export function Admin() {
                           onClick={() => act(() => api.adminSetMerchantStatus(m.id, "SUSPENDED"))}
                           data-testid={`suspend-${m.shopName}`}
                         >
-                          {m.status === "PENDING" ? "Reject" : "Suspend"}
+                          {m.status === "PENDING" ? t("admin.reject") : t("admin.suspend")}
                         </button>
                       )}
                     </td>
@@ -254,31 +251,29 @@ export function Admin() {
 
       {section === "categories" && (
         <section className="card">
-          <h2>Master categories</h2>
-          <p className="muted">
-            Shared by every shop. Merchants choose from this list but cannot change it.
-          </p>
+          <h2>{t("admin.masterCategories")}</h2>
+          <p className="muted">{t("admin.masterCategoriesSub")}</p>
 
           <div className="product-form">
             <div className="field">
-              <label htmlFor="newCategory">New category</label>
+              <label htmlFor="newCategory">{t("admin.newCategory")}</label>
               <input
                 id="newCategory"
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
-                placeholder="e.g. Baby Care"
+                placeholder={t("admin.newCategoryPlaceholder")}
                 data-testid="new-category-name"
               />
             </div>
             <div className="field">
-              <label htmlFor="newCategoryParent">Inside</label>
+              <label htmlFor="newCategoryParent">{t("admin.inside")}</label>
               <select
                 id="newCategoryParent"
                 value={newCategoryParent}
                 onChange={(e) => setNewCategoryParent(e.target.value)}
                 data-testid="new-category-parent"
               >
-                <option value="">Top level</option>
+                <option value="">{t("admin.topLevel")}</option>
                 {categories
                   .filter((c) => c.parentCategoryId === null)
                   .map((c) => (
@@ -300,7 +295,7 @@ export function Admin() {
                 }}
                 data-testid="add-category"
               >
-                Add category
+                {t("admin.addCategory")}
               </button>
             </div>
           </div>
@@ -308,9 +303,9 @@ export function Admin() {
           <table>
             <thead>
               <tr>
-                <th>Category</th>
-                <th>Products</th>
-                <th>Subcategories</th>
+                <th>{t("admin.thCategory")}</th>
+                <th>{t("admin.thProducts")}</th>
+                <th>{t("admin.thSubcategories")}</th>
                 <th />
               </tr>
             </thead>
@@ -325,24 +320,24 @@ export function Admin() {
                       className="ghost"
                       disabled={busy}
                       onClick={() => {
-                        const name = prompt(`Rename "${c.name}" to:`, c.name);
+                        const name = prompt(t("admin.renamePrompt", { name: c.name }), c.name);
                         if (name) void act(() => api.adminRenameCategory(c.id, name));
                       }}
                       data-testid={`rename-${c.name}`}
                     >
-                      Rename
+                      {t("admin.rename")}
                     </button>
                     <button
                       className="ghost danger"
                       disabled={busy}
                       onClick={() => {
-                        if (confirm(`Delete "${c.path}"?`)) {
+                        if (confirm(t("admin.deleteConfirm", { path: c.path }))) {
                           void act(() => api.adminDeleteCategory(c.id));
                         }
                       }}
                       data-testid={`delete-category-${c.name}`}
                     >
-                      Delete
+                      {t("admin.delete")}
                     </button>
                   </td>
                 </tr>
@@ -355,28 +350,27 @@ export function Admin() {
       {section === "ignored" && (
         <section className="card">
           <div className="list-head">
-            <h2>Orders the shop has not responded to</h2>
+            <h2>{t("admin.ignoredTitle")}</h2>
           </div>
 
           {ignored.length === 0 ? (
             <p className="muted empty" data-testid="admin-ignored-empty">
-              Nothing waiting. Every order has been picked up by its shop.
+              {t("admin.ignoredEmpty")}
             </p>
           ) : (
             <>
               <p className="alert error" role="alert">
-                These customers are waiting and the shop has not acknowledged their order. Call the
-                shop. The customer can cancel free of charge.
+                {t("admin.ignoredWarning")}
               </p>
               <table data-testid="admin-ignored-table">
                 <thead>
                   <tr>
-                    <th>Waiting</th>
-                    <th>Shop</th>
-                    <th>Call the shop</th>
-                    <th>Customer</th>
-                    <th>Items</th>
-                    <th>Total</th>
+                    <th>{t("admin.thWaiting")}</th>
+                    <th>{t("admin.thShop")}</th>
+                    <th>{t("admin.thCallShop")}</th>
+                    <th>{t("admin.thCustomer")}</th>
+                    <th>{t("admin.thItems")}</th>
+                    <th>{t("admin.thTotal")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -396,7 +390,7 @@ export function Admin() {
                       </td>
                       <td>{o.customerPhone}</td>
                       <td>{o.itemCount}</td>
-                      <td>{o.totalPrice} JOD</td>
+                      <td>{t("admin.jod", { value: o.totalPrice })}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -409,7 +403,7 @@ export function Admin() {
       {section === "orders" && (
         <section className="card">
           <div className="list-head">
-            <h2>All orders</h2>
+            <h2>{t("admin.allOrders")}</h2>
             <label className="muted">
               <input
                 type="checkbox"
@@ -418,24 +412,24 @@ export function Admin() {
                 data-testid="cancelled-only"
                 style={{ width: "auto", marginRight: 6 }}
               />
-              Cancellations only
+              {t("admin.cancellationsOnly")}
             </label>
           </div>
 
           {orders.length === 0 ? (
             <p className="muted empty" data-testid="admin-no-orders">
-              No orders to show.
+              {t("admin.noOrders")}
             </p>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <th>Placed</th>
-                  <th>Shop</th>
-                  <th>Customer</th>
-                  <th>Total</th>
-                  <th>Status</th>
-                  <th>Notes</th>
+                  <th>{t("admin.thPlaced")}</th>
+                  <th>{t("admin.thShop")}</th>
+                  <th>{t("admin.thCustomer")}</th>
+                  <th>{t("admin.thTotal")}</th>
+                  <th>{t("admin.thStatus")}</th>
+                  <th>{t("admin.thNotes")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -444,14 +438,17 @@ export function Admin() {
                     <td className="muted">{new Date(o.createdAt).toLocaleString()}</td>
                     <td>{o.shopName}</td>
                     <td className="muted">{o.customerPhone}</td>
-                    <td className="price">{o.totalPrice} JOD</td>
+                    <td className="price">{t("admin.jod", { value: o.totalPrice })}</td>
                     <td>
-                      <span className={`badge ${o.status.toLowerCase()}`}>{o.status}</span>
+                      <span className={`badge ${o.status.toLowerCase()}`}>
+                        {t(`admin.orderStatus.${o.status}`)}
+                      </span>
                     </td>
                     <td className="muted">
                       {o.cancellationReason && (
                         <span data-testid="admin-order-cancel-reason">
-                          {o.cancelledBy?.toLowerCase()}: {o.cancellationReason}
+                          {o.cancelledBy ? t(`admin.by.${o.cancelledBy.toLowerCase()}`) : ""}:{" "}
+                          {o.cancellationReason}
                         </span>
                       )}
                       {o.review && (

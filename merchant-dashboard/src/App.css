@@ -681,3 +681,50 @@ td.price {
   font-size: 12px;
   color: var(--ink-soft);
 }
+
+/* Language toggle (Arabic / English). Small, always visible — never buried. */
+.lang-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--card-alt);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.topbar .lang-toggle {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+.lang-pill {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  width: auto;
+  margin: 0;
+}
+.topbar .lang-pill {
+  color: rgba(255, 255, 255, 0.85);
+}
+.lang-pill.active {
+  background: var(--brand);
+  color: #fff;
+}
+.topbar .lang-pill.active {
+  background: #fff;
+  color: var(--brand-darker);
+}
+.auth-toggle {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}

@@ -11,6 +11,7 @@
  * stub customers afterwards so the dev DB returns to the seed.
  */
 import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const API = "http://localhost:3000/api";
 const SEEDED_MERCHANT = "0791234567";
@@ -55,6 +56,8 @@ async function signInAndOpenOrders(page: Page) {
 }
 
 test.describe("Merchant order handling", () => {
+  test.beforeEach(async ({ page }) => forceEnglish(page));
+
   test("a new order appears, and can be confirmed then started", async ({ page }) => {
     await placeOrder();
     await signInAndOpenOrders(page);

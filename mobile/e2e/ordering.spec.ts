@@ -8,6 +8,7 @@
  * Run with: npm run test:e2e
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 /** Reserved test range — see backend `npm run db:clean-test-data`. */
 function uniquePhone(): string {
@@ -25,6 +26,8 @@ async function signIn(page: Page, phone = uniquePhone()) {
   await expect(page.getByTestId("shop-name")).toBeVisible({ timeout: 20_000 });
   return phone;
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test.describe("Placing an order", () => {
   test("a customer can fill a basket and place a cash-on-delivery order", async ({ page }) => {

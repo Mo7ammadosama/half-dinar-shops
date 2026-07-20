@@ -2389,3 +2389,89 @@ NOT re-seeded — `seed:demo-orders` is the opt-in demo step.)
    loses no customer-side coverage.
 2. **Don't manufacture a new attack "fix."** No new surface means no new vuln; the right deliverable is
    a genuine re-verification plus a sabotage that proves the harness bites — which it does.
+
+---
+
+## Phase 12 — Notification sound + Arabic/English (RTL) — 2026-07-20 ✅
+
+Two founder requests, done autonomously while the founder was away. Every decision below was made with
+the "pick the most reasonable default and log it" rule.
+
+### Part 1 — the merchant new-order notification was silent
+
+**The problem.** The push arrives on the shopkeeper's phone (even closed), but plays no sound. A silent
+notification is as good as no notification for someone not staring at the screen — the exact failure
+mode that ruins the customer's experience if an order is missed.
+
+**Diagnosis.** On **Android 8+, the sound is a property of the notification CHANNEL, not the push
+message.** Two things were wrong: the server sent no `channelId` (so Android delivered through its
+*silent fallback channel* and ignored the payload sound), and the app's `"orders"` channel was created
+with no explicit sound.
+
+**The catch that would have made a "green" fix still silent.** Android notification channels are
+**immutable after first creation** — re-declaring `"orders"` with a sound is a no-op on any phone that
+already installed an earlier build. So the fix uses a **new channel id, `orders-v2`**, created cleanly
+with `sound: "default"` and MAX importance (merchant) / HIGH (customer). The server now routes every
+order push through that channel and always sends a sound.
+
+**What I could and couldn't verify.** 23 automated tests assert the server sends `channelId:"orders-v2"`
++ `sound:"default"` on both the merchant new-order push and customer order pushes. The **actual sound
+from the speaker is device-only** — I documented a precise phone walk-through in `docs/PUSH_SETUP.md`,
+including the critical step: **reinstall or clear the app's data first**, or Android keeps the old
+soundless channel. iOS was likely already fine (payload sound drives it; no channels).
+
+### Part 2 — Arabic / English with RTL, across all three apps
+
+**Approach.** Standard **i18next + react-i18next** in the customer app, the merchant app, and the admin
+console. Strings live in `src/i18n/{en,ar}.json` per app; components call `t("key")`. I proved the whole
+pattern on the smallest app (merchant) first — tests green including a new Arabic+RTL spec — then
+replicated to the customer app and the web console.
+
+**Decisions (logged, not asked):**
+
+- **Default Arabic**, per the target market. English is opt-in and remembered **per device**, under
+  distinct keys (`halfdinar.{customer,merchant,admin}.lang`) so the three apps never clash.
+- An **always-visible AR|EN toggle** on every sign-in screen and in every header — the founder asked
+  for "obvious, not buried".
+- **RTL**: on the web (customer/merchant web target + the console) via the `<html dir>` attribute, which
+  the browser mirrors natively; on native React Native via `I18nManager.forceRTL`, which needs an app
+  reload to fully apply (done on an explicit toggle, skipped on silent startup to avoid a boot loop).
+- **Only client UI chrome is localised. Server-generated text stays English this pass** — including the
+  push bodies from Part 1 ("New order"). Localising server text needs the server to store each device's
+  language, which is a real follow-up. **So a shopkeeper using Arabic still gets an English "New order"
+  push for now** — this is a deliberate, logged scope line, not an oversight.
+- **Data is never translated** (product/shop/category names, prices). Numerals stay Western; only the
+  currency label becomes `د.أ` in Arabic.
+
+**Honest verification limit.** The e2e proves the strings switch and the document direction flips
+(`html[dir=rtl]`), on the **web** target. **react-native-web does not fully mirror flex layout from
+`dir`**, so true *native* layout mirroring is device-pending — the same "web-verified, device-owed"
+class as the existing B5/B6b caveats.
+
+**Testing without breaking the existing suites.** Every existing e2e asserts English chrome, and the app
+now defaults to Arabic — so each app's specs force English before load via a shared `e2e/lang.ts`
+(`addInitScript` seeding the lang key). This keeps them meaningful (they test the app in English) rather
+than rewriting hundreds of string assertions. Each app also gained a dedicated `language.spec.ts`
+proving default-Arabic + RTL, the toggle, and persistence.
+
+### A real defect the run surfaced (fixed)
+
+`seed` failed with a Prisma **P2003 (Product FK)**: leftover e2e orders whose customers are **outside**
+the reserved `+962780000XXX` range are not swept by `db:clean-test-data`, and they block the seed from
+resetting the pilot's products. Added `npm run db:reset-orders` (clears all dev orders) and documented
+the "reset-orders → seed" recovery. Every order in the dev DB is test-generated, so this is safe.
+
+### Result
+
+- **Backend:** 18 db + **383** API/attack (17 suites) — all green. Includes the new push-channel
+  assertions; the `notifyUser` signature widened to `Omit<PushMessage,"to">` with no behaviour change.
+- **Merchant app:** 8 jest + **20** Playwright (incl. 3 new language/RTL).
+- **Customer app:** 19 jest + **35** Playwright (incl. 3 new language/RTL; `full-lifecycle` green with
+  the admin console up and its own context forced to English).
+- **Admin console:** **13** Playwright (incl. 3 new language/RTL).
+- `npm audit` **0** in all four projects; `expo-doctor` unchanged (17/18 baseline — the pre-existing
+  `app.json`+`app.config.js` note, no regression from the added i18n deps); all typechecks clean.
+- DB restored to the **pristine seed: 3 users / 0 orders / 1 shop / 20 products** (demo removed).
+
+**No production code was changed beyond the two features** (the push seam for sound + i18n wiring). The
+only backend logic touched is the notification channel routing; everything else is client i18n and tests.

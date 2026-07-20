@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Admin } from "./Admin";
 import { clearToken, getRole, getToken } from "./api";
+import { LanguageToggle } from "./i18n/LanguageToggle";
 import { Login } from "./Login";
 import "./App.css";
 
@@ -18,6 +20,7 @@ import "./App.css";
  * never a screenful of 403s from calling admin endpoints they cannot use.
  */
 export default function App() {
+  const { t } = useTranslation();
   const [signedIn, setSignedIn] = useState(() => getToken() !== null);
   const [role, setRoleState] = useState(() => getRole());
 
@@ -41,16 +44,18 @@ export default function App() {
     return (
       <div className="auth-shell">
         <div className="card auth-card">
+          <div className="auth-toggle">
+            <LanguageToggle />
+          </div>
           <h1 className="brand">
-            Half-Dinar <span>Shops</span>
+            {t("brand.name")} <span>{t("brand.accent")}</span>
           </h1>
-          <p className="muted">Admin console</p>
+          <p className="muted">{t("app.adminConsole")}</p>
           <div className="alert error" role="alert" data-testid="not-admin">
-            This console is for administrators only. If you run a shop, use the Half-Dinar
-            Merchant app on your phone.
+            {t("app.notAdmin")}
           </div>
           <button className="ghost" onClick={signOut} data-testid="not-admin-sign-out">
-            Sign out
+            {t("app.signOut")}
           </button>
         </div>
       </div>
@@ -62,15 +67,18 @@ export default function App() {
       <header className="topbar">
         <div>
           <h1 className="brand">
-            Half-Dinar <span>Shops</span>
+            {t("brand.name")} <span>{t("brand.accent")}</span>
           </h1>
           <p className="muted" data-testid="admin-header">
-            Admin panel
+            {t("app.adminPanel")}
           </p>
         </div>
-        <button className="ghost" onClick={signOut} data-testid="admin-sign-out">
-          Sign out
-        </button>
+        <div className="topbar-actions">
+          <LanguageToggle />
+          <button className="ghost" onClick={signOut} data-testid="admin-sign-out">
+            {t("app.signOut")}
+          </button>
+        </div>
       </header>
       <Admin />
     </div>

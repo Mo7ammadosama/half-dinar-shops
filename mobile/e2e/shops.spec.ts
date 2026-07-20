@@ -15,6 +15,7 @@
  * Run with: npm run test:e2e
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const SEEDED_CUSTOMER = "0791111111";
 
@@ -28,6 +29,8 @@ async function signInToList(page: Page) {
     page.getByTestId("shop-card").filter({ hasText: "Al-Nus Dinar Shop" }),
   ).toBeVisible({ timeout: 15_000 });
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test.describe("Nearest shop", () => {
   // Stand exactly on the pilot shop's coordinates (downtown Al-Balad), so the

@@ -21,6 +21,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { api, type Order, type OrderStatus, type OrderSummary } from "./api";
 import { colors } from "./theme";
 
@@ -33,16 +34,6 @@ import { colors } from "./theme";
 function callNumber(phone: string) {
   void Linking.openURL(`tel:${phone}`);
 }
-
-/** Plain-language status, written for a shopper rather than a developer. */
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  PENDING: "Waiting for the shop to confirm",
-  CONFIRMED: "Confirmed by the shop",
-  PREPARING: "The shop is picking your items",
-  DELIVERING: "On its way to you",
-  DELIVERED: "Delivered",
-  CANCELLED: "Cancelled",
-};
 
 const STATUS_STYLE: Record<OrderStatus, { bg: string; fg: string }> = {
   PENDING: { bg: colors.warnSoft, fg: colors.warn },
@@ -59,19 +50,26 @@ const STATUS_STYLE: Record<OrderStatus, { bg: string; fg: string }> = {
  * React Native's Alert is a no-op on web, so window.confirm is used there —
  * otherwise the warning the spec requires would silently not appear.
  */
-async function confirmAction(title: string, message: string): Promise<boolean> {
+async function confirmAction(
+  title: string,
+  message: string,
+  keepLabel: string,
+  cancelLabel: string,
+): Promise<boolean> {
   if (Platform.OS === "web") {
     return Promise.resolve(window.confirm(`${title}\n\n${message}`));
   }
   return new Promise((resolve) => {
     Alert.alert(title, message, [
-      { text: "Keep my order", style: "cancel", onPress: () => resolve(false) },
-      { text: "Cancel order", style: "destructive", onPress: () => resolve(true) },
+      { text: keepLabel, style: "cancel", onPress: () => resolve(false) },
+      { text: cancelLabel, style: "destructive", onPress: () => resolve(true) },
     ]);
   });
 }
 
 export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
+  const statusLabel = (s: OrderStatus) => t(`orders.status.${s}`);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,8 +118,10 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
     // The spec requires a warning once the shop is already working on it.
     if (order.cancelRequiresWarning) {
       const ok = await confirmAction(
-        "The shop has already started",
-        "Your items are being picked right now. Are you sure you want to cancel?",
+        t("orders.confirmStartedTitle"),
+        t("orders.confirmStartedBody"),
+        t("orders.keepMyOrder"),
+        t("orders.cancelOrder"),
       );
       if (!ok) return;
     }
@@ -169,9 +169,9 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.flex}>
         <View style={styles.header}>
-          <Text style={styles.title}>Your orders</Text>
+          <Text style={styles.title}>{t("orders.title")}</Text>
           <TouchableOpacity onPress={selected ? () => setSelected(null) : onClose} testID="orders-close">
-            <Text style={styles.close}>{selected ? "Back" : "Close"}</Text>
+            <Text style={styles.close}>{selected ? t("common.back") : t("common.close")}</Text>
           </TouchableOpacity>
         </View>
 
@@ -192,7 +192,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
           >
             <View style={[styles.statusPill, { backgroundColor: STATUS_STYLE[selected.status].bg }]}>
               <Text style={[styles.statusText, { color: STATUS_STYLE[selected.status].fg }]} testID="detail-status">
-                {STATUS_LABEL[selected.status]}
+                {statusLabel(selected.status)}
               </Text>
             </View>
 
@@ -200,7 +200,10 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
               <View style={styles.reasonBox} testID="detail-cancel-reason">
                 <Text style={styles.reasonText}>
                   {selected.cancelledBy === "MERCHANT"
-                    ? `${selected.shop.shopName} cancelled: ${selected.cancellationReason}`
+                    ? t("orders.merchantCancelled", {
+                        shop: selected.shop.shopName,
+                        reason: selected.cancellationReason,
+                      })
                     : selected.cancellationReason}
                 </Text>
               </View>
@@ -233,7 +236,10 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                 testID="call-shop"
               >
                 <Text style={styles.callButtonText}>
-                  Call {selected.shop.shopName} · {selected.contact.shopPhone}
+                  {t("orders.callShop", {
+                    shop: selected.shop.shopName,
+                    phone: selected.contact.shopPhone,
+                  })}
                 </Text>
               </TouchableOpacity>
             )}
@@ -245,23 +251,26 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                 testID="call-driver"
               >
                 <Text style={styles.callButtonText}>
-                  Call {selected.contact.driverName} · {selected.contact.driverPhone}
+                  {t("orders.callDriver", {
+                    name: selected.contact.driverName,
+                    phone: selected.contact.driverPhone,
+                  })}
                 </Text>
               </TouchableOpacity>
             )}
 
             {selected.hasUnavailableItems && selected.status !== "CANCELLED" && (
               <View style={styles.changesBox} testID="unavailable-notice">
-                <Text style={styles.changesTitle}>Some items are out of stock</Text>
+                <Text style={styles.changesTitle}>{t("orders.outOfStockTitle")}</Text>
                 <Text style={styles.changesBody}>
                   {selected.unavailableItemNames.join(", ")}
                 </Text>
                 <Text style={styles.changesBody}>
-                  Remove them and your total becomes{" "}
+                  {t("orders.removeBecomesPre")}
                   <Text style={styles.changesStrong} testID="revised-total">
-                    {selected.revisedTotal} JOD
+                    {t("orders.lineTotal", { total: selected.revisedTotal })}
                   </Text>
-                  .
+                  {t("orders.removeBecomesPost")}
                 </Text>
                 <TouchableOpacity
                   style={styles.acceptButton}
@@ -269,7 +278,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                   disabled={busy}
                   testID="accept-changes"
                 >
-                  <Text style={styles.acceptButtonText}>Remove them and continue</Text>
+                  <Text style={styles.acceptButtonText}>{t("orders.removeContinue")}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -281,21 +290,21 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                     style={[styles.rowName, item.status === "UNAVAILABLE" && styles.struck]}
                     testID={`detail-item-${item.name}`}
                   >
-                    {item.quantity} × {item.name}
-                    {item.status === "UNAVAILABLE" ? "  (out of stock)" : ""}
+                    {t("orders.itemLine", { quantity: item.quantity, name: item.name })}
+                    {item.status === "UNAVAILABLE" ? t("orders.outOfStockSuffix") : ""}
                   </Text>
-                  <Text style={styles.rowValue}>{item.lineTotal} JOD</Text>
+                  <Text style={styles.rowValue}>{t("orders.lineTotal", { total: item.lineTotal })}</Text>
                 </View>
               ))}
 
               <View style={[styles.row, styles.divider]}>
-                <Text style={styles.rowLabel}>Delivery</Text>
-                <Text style={styles.rowValue}>{selected.deliveryFee} JOD</Text>
+                <Text style={styles.rowLabel}>{t("orders.delivery")}</Text>
+                <Text style={styles.rowValue}>{t("orders.lineTotal", { total: selected.deliveryFee })}</Text>
               </View>
               <View style={[styles.row, styles.divider]}>
-                <Text style={styles.totalLabel}>Total (cash)</Text>
+                <Text style={styles.totalLabel}>{t("orders.totalCash")}</Text>
                 <Text style={styles.totalValue} testID="detail-total">
-                  {selected.totalPrice} JOD
+                  {t("orders.lineTotal", { total: selected.totalPrice })}
                 </Text>
               </View>
             </View>
@@ -303,7 +312,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
             {/* Reviews: only once it actually arrived, and only once. */}
             {selected.review && (
               <View style={styles.reviewBox} testID="existing-review">
-                <Text style={styles.reviewTitle}>You rated this order</Text>
+                <Text style={styles.reviewTitle}>{t("orders.youRated")}</Text>
                 <Text style={styles.reviewStars} testID="review-stars">
                   {"★".repeat(selected.review.rating)}
                   {"☆".repeat(5 - selected.review.rating)}
@@ -316,7 +325,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
 
             {selected.canReview && (
               <View style={styles.reviewBox} testID="review-form">
-                <Text style={styles.reviewTitle}>How was it?</Text>
+                <Text style={styles.reviewTitle}>{t("orders.howWas")}</Text>
                 <View style={styles.starRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity
@@ -334,7 +343,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                   style={styles.reviewInput}
                   value={comment}
                   onChangeText={setComment}
-                  placeholder="Anything to add? (optional)"
+                  placeholder={t("orders.reviewPlaceholder")}
                   placeholderTextColor={colors.muted}
                   testID="review-comment"
                 />
@@ -344,7 +353,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                   disabled={busy || rating === 0}
                   testID="submit-review"
                 >
-                  <Text style={styles.acceptButtonText}>Send review</Text>
+                  <Text style={styles.acceptButtonText}>{t("orders.sendReview")}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -357,7 +366,7 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                 testID="cancel-order"
               >
                 <Text style={styles.cancelButtonText}>
-                  {busy ? "Cancelling…" : "Cancel this order"}
+                  {busy ? t("orders.cancelling") : t("orders.cancelThisOrder")}
                 </Text>
               </TouchableOpacity>
             ) : (
@@ -370,8 +379,8 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
           </ScrollView>
         ) : orders.length === 0 ? (
           <View style={styles.centered} testID="no-orders">
-            <Text style={styles.emptyTitle}>No orders yet</Text>
-            <Text style={styles.emptyBody}>Your orders will appear here.</Text>
+            <Text style={styles.emptyTitle}>{t("orders.noOrdersTitle")}</Text>
+            <Text style={styles.emptyBody}>{t("orders.noOrdersBody")}</Text>
           </View>
         ) : (
           <ScrollView
@@ -388,16 +397,18 @@ export function OrdersScreen({ visible, onClose }: { visible: boolean; onClose: 
                 <View style={styles.orderBody}>
                   <Text style={styles.orderShop}>{o.shopName}</Text>
                   <Text style={styles.orderMeta}>
-                    {o.itemCount} item{o.itemCount === 1 ? "" : "s"} ·{" "}
-                    {new Date(o.createdAt).toLocaleString()}
+                    {t("orders.orderMeta", {
+                      items: t("common.itemsCount", { count: o.itemCount }),
+                      date: new Date(o.createdAt).toLocaleString(),
+                    })}
                   </Text>
                   <View style={[styles.statusPillSmall, { backgroundColor: STATUS_STYLE[o.status].bg }]}>
                     <Text style={[styles.statusTextSmall, { color: STATUS_STYLE[o.status].fg }]} testID="row-status">
-                      {STATUS_LABEL[o.status]}
+                      {statusLabel(o.status)}
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.orderTotal}>{o.totalPrice} JOD</Text>
+                <Text style={styles.orderTotal}>{t("orders.totalJod", { total: o.totalPrice })}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>

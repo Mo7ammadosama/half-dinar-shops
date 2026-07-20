@@ -9,6 +9,7 @@
  *   npx playwright test approved-only --grep "visible"  # with shop approved
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const SEEDED_CUSTOMER = "0791111111";
 
@@ -19,6 +20,8 @@ async function signIn(page: Page) {
   await expect(page.getByTestId("code-input")).toHaveValue(/^\d{6}$/, { timeout: 15_000 });
   await page.getByTestId("verify-code").click();
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test("an unapproved shop is hidden from the customer entirely", async ({ page }) => {
   await signIn(page);

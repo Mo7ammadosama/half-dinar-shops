@@ -29,6 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import {
   api,
   imageSrc,
@@ -47,6 +48,7 @@ type AvailFilter = "all" | "in" | "out";
 type SortBy = "recent" | "name" | "price";
 
 export function ProductsScreen() {
+  const { t } = useTranslation();
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
@@ -117,7 +119,7 @@ export function ProductsScreen() {
 
   async function handleSubmit() {
     if (!form.name.trim() || !form.price || !form.categoryId) {
-      setError("Name, price and category are all required.");
+      setError(t("products.errRequired"));
       return;
     }
     setBusy(true);
@@ -137,7 +139,7 @@ export function ProductsScreen() {
       }
       resetForm();
       await loadProducts(search);
-      setToast({ message: wasEditing ? "Changes saved" : "Product added", tone: "ok" });
+      setToast({ message: wasEditing ? t("products.toastSaved") : t("products.toastAdded"), tone: "ok" });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -154,7 +156,7 @@ export function ProductsScreen() {
    */
   async function handleCapture(result: CaptureResult) {
     if (result.status === "denied") {
-      setError("Camera permission was denied. You can still type the product in.");
+      setError(t("products.errCameraDenied"));
       return;
     }
     if (result.status === "unavailable") {
@@ -216,9 +218,11 @@ export function ProductsScreen() {
       // Undo is safe here: availability is a single reversible flag that does not
       // touch any order or notify a customer.
       setToast({
-        message: next ? `“${product.name}” is back in stock` : `“${product.name}” marked out of stock`,
+        message: next
+          ? t("products.toastBackInStock", { name: product.name })
+          : t("products.toastMarkedOut", { name: product.name }),
         tone: "ok",
-        actionLabel: "Undo",
+        actionLabel: t("products.undo"),
         onAction: async () => {
           try {
             await api.setAvailability(product.id, product.isAvailable);
@@ -240,7 +244,7 @@ export function ProductsScreen() {
       setConfirmDeleteId(null);
       await loadProducts(search);
       if (editingId === product.id) resetForm();
-      setToast({ message: `“${product.name}” deleted`, tone: "danger" });
+      setToast({ message: t("products.toastDeleted", { name: product.name }), tone: "danger" });
     } catch (err) {
       setError((err as Error).message);
     }
@@ -259,7 +263,7 @@ export function ProductsScreen() {
 
       {/* Add / edit form */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>{editingId ? "Edit product" : "Add a product"}</Text>
+        <Text style={styles.cardTitle}>{editingId ? t("products.editProduct") : t("products.addProduct")}</Text>
 
         {/* Photo → AI entry */}
         <View style={styles.photoRow}>
@@ -267,7 +271,7 @@ export function ProductsScreen() {
             <Image source={{ uri: imageSrc(form.imageUrl) }} style={styles.photoPreview} />
           ) : (
             <View style={[styles.photoPreview, styles.photoPlaceholder]}>
-              <Text style={styles.photoPlaceholderText}>No photo</Text>
+              <Text style={styles.photoPlaceholderText}>{t("products.noPhoto")}</Text>
             </View>
           )}
           <View style={styles.photoButtons}>
@@ -277,7 +281,7 @@ export function ProductsScreen() {
               disabled={uploading || suggesting}
               testID="take-photo"
             >
-              <Text style={styles.secondaryButtonText}>📷 Take photo</Text>
+              <Text style={styles.secondaryButtonText}>{t("products.takePhoto")}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.secondaryButton}
@@ -285,14 +289,14 @@ export function ProductsScreen() {
               disabled={uploading || suggesting}
               testID="pick-photo"
             >
-              <Text style={styles.secondaryButtonText}>🖼️ Gallery</Text>
+              <Text style={styles.secondaryButtonText}>{t("products.gallery")}</Text>
             </TouchableOpacity>
           </View>
         </View>
-        {uploading && <Text style={styles.muted}>Uploading photo…</Text>}
+        {uploading && <Text style={styles.muted}>{t("products.uploading")}</Text>}
         {suggesting && (
           <Text style={styles.muted} testID="suggesting">
-            Reading the photo…
+            {t("products.reading")}
           </Text>
         )}
 
@@ -302,18 +306,21 @@ export function ProductsScreen() {
             testID="ai-suggestion"
           >
             <Text style={styles.suggestionHead}>
-              {suggestion.confidence < 0.5
-                ? "Not sure what this is — please fill it in"
-                : "Filled in from the photo — please check"}
+              {suggestion.confidence < 0.5 ? t("products.aiUnsure") : t("products.aiFilled")}
             </Text>
             <Text style={styles.suggestionMeta} testID="ai-confidence">
-              {Math.round(suggestion.confidence * 100)}% confident ·{" "}
-              {suggestion.provider === "mock" ? "Demo mode (canned example)" : "Correct anything wrong before saving"}
+              {t("products.aiConfidence", {
+                pct: Math.round(suggestion.confidence * 100),
+                note:
+                  suggestion.provider === "mock"
+                    ? t("products.aiDemoNote")
+                    : t("products.aiCheckNote"),
+              })}
             </Text>
           </View>
         )}
 
-        <Text style={styles.label}>Product name</Text>
+        <Text style={styles.label}>{t("products.productName")}</Text>
         <TextInput
           style={styles.input}
           value={form.name}
@@ -323,7 +330,7 @@ export function ProductsScreen() {
           testID="product-name"
         />
 
-        <Text style={styles.label}>Price (JOD)</Text>
+        <Text style={styles.label}>{t("products.priceLabel")}</Text>
         <TextInput
           style={styles.input}
           value={form.price}
@@ -334,14 +341,14 @@ export function ProductsScreen() {
           testID="product-price"
         />
 
-        <Text style={styles.label}>Category</Text>
+        <Text style={styles.label}>{t("products.category")}</Text>
         <TouchableOpacity
           style={styles.input}
           onPress={() => setShowCategories((s) => !s)}
           testID="category-picker"
         >
           <Text style={selectedCategory ? styles.pickerValue : styles.pickerPlaceholder}>
-            {selectedCategory ? selectedCategory.path : "Choose a category…"}
+            {selectedCategory ? selectedCategory.path : t("products.chooseCategory")}
           </Text>
         </TouchableOpacity>
         {showCategories && (
@@ -380,13 +387,13 @@ export function ProductsScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.buttonText}>
-                {editingId ? "Save changes" : "Add product"}
+                {editingId ? t("products.saveChanges") : t("products.addProductBtn")}
               </Text>
             )}
           </TouchableOpacity>
           {editingId && (
             <TouchableOpacity style={styles.ghostButton} onPress={resetForm} testID="cancel-edit">
-              <Text style={styles.ghostButtonText}>Cancel</Text>
+              <Text style={styles.ghostButtonText}>{t("products.cancel")}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -394,7 +401,7 @@ export function ProductsScreen() {
 
       {/* Product list */}
       <View style={styles.listHead}>
-        <Text style={styles.cardTitle}>Your products ({products.length})</Text>
+        <Text style={styles.cardTitle}>{t("products.yourProducts", { count: products.length })}</Text>
       </View>
 
       {/* Out-of-stock warning — the thing a shopkeeper most needs to notice. */}
@@ -405,8 +412,11 @@ export function ProductsScreen() {
           testID="stock-warning"
         >
           <Text style={styles.stockWarnText}>
-            ⚠️ {outOfStockCount} of {products.length} product{products.length === 1 ? "" : "s"} out of stock
-            {"  "}· tap to {availFilter === "out" ? "show all" : "review"}
+            {t("products.stockWarn", {
+              out: outOfStockCount,
+              total: products.length,
+              action: availFilter === "out" ? t("products.stockWarnShowAll") : t("products.stockWarnReview"),
+            })}
           </Text>
         </TouchableOpacity>
       )}
@@ -415,7 +425,7 @@ export function ProductsScreen() {
         style={[styles.input, styles.searchInput]}
         value={search}
         onChangeText={setSearch}
-        placeholder="Search products…"
+        placeholder={t("products.searchPlaceholder")}
         placeholderTextColor={colors.faint}
         testID="product-search"
       />
@@ -425,32 +435,32 @@ export function ProductsScreen() {
         value={availFilter}
         onChange={setAvailFilter}
         options={[
-          { value: "all", label: "All", count: products.length },
-          { value: "in", label: "In stock", count: inStockCount },
-          { value: "out", label: "Out of stock", count: outOfStockCount },
+          { value: "all", label: t("products.filterAll"), count: products.length },
+          { value: "in", label: t("products.filterIn"), count: inStockCount },
+          { value: "out", label: t("products.filterOut"), count: outOfStockCount },
         ]}
       />
       <View style={styles.sortRow}>
-        <Text style={styles.sortLabel}>Sort</Text>
+        <Text style={styles.sortLabel}>{t("products.sort")}</Text>
         <Chips<SortBy>
           testIDPrefix="prodsort"
           value={sortBy}
           onChange={setSortBy}
           options={[
-            { value: "recent", label: "Recent" },
-            { value: "name", label: "Name" },
-            { value: "price", label: "Price" },
+            { value: "recent", label: t("products.sortRecent") },
+            { value: "name", label: t("products.sortName") },
+            { value: "price", label: t("products.sortPrice") },
           ]}
         />
       </View>
 
       {products.length === 0 ? (
         <Text style={styles.emptyText} testID="no-products">
-          No products yet. Add your first one above.
+          {t("products.noProducts")}
         </Text>
       ) : visibleProducts.length === 0 ? (
         <Text style={styles.emptyText} testID="no-products-filtered">
-          No products match this filter.
+          {t("products.noProductsFiltered")}
         </Text>
       ) : (
         visibleProducts.map((p) => (
@@ -467,7 +477,7 @@ export function ProductsScreen() {
                 {p.name}
               </Text>
               <Text style={styles.productMeta}>{p.categoryPath}</Text>
-              <Text style={styles.productPrice}>{p.price} JOD</Text>
+              <Text style={styles.productPrice}>{t("products.priceUnit", { price: p.price })}</Text>
             </View>
             <View style={styles.productActions}>
               <TouchableOpacity
@@ -476,28 +486,28 @@ export function ProductsScreen() {
                 testID={`toggle-${p.id}`}
               >
                 <Text style={p.isAvailable ? styles.pillOnText : styles.pillOffText}>
-                  {p.isAvailable ? "In stock" : "Out of stock"}
+                  {p.isAvailable ? t("products.inStock") : t("products.outOfStock")}
                 </Text>
               </TouchableOpacity>
               {confirmDeleteId === p.id ? (
                 <View style={styles.confirmDelete} testID={`confirm-delete-box-${p.id}`}>
-                  <Text style={styles.confirmDeleteText}>Delete this?</Text>
+                  <Text style={styles.confirmDeleteText}>{t("products.deleteThis")}</Text>
                   <View style={styles.rowButtons}>
                     <TouchableOpacity onPress={() => handleDelete(p)} testID={`confirm-delete-${p.id}`}>
-                      <Text style={[styles.linkAction, styles.linkDanger]}>Yes, delete</Text>
+                      <Text style={[styles.linkAction, styles.linkDanger]}>{t("products.yesDelete")}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => setConfirmDeleteId(null)} testID={`cancel-delete-${p.id}`}>
-                      <Text style={styles.linkAction}>Keep</Text>
+                      <Text style={styles.linkAction}>{t("products.keep")}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
                 <View style={styles.rowButtons}>
                   <TouchableOpacity onPress={() => startEdit(p)} testID={`edit-${p.id}`}>
-                    <Text style={styles.linkAction}>Edit</Text>
+                    <Text style={styles.linkAction}>{t("products.edit")}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => setConfirmDeleteId(p.id)} testID={`delete-${p.id}`}>
-                    <Text style={[styles.linkAction, styles.linkDanger]}>Delete</Text>
+                    <Text style={[styles.linkAction, styles.linkDanger]}>{t("products.delete")}</Text>
                   </TouchableOpacity>
                 </View>
               )}

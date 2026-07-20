@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, setRole, setToken } from "./api";
+import { LanguageToggle } from "./i18n/LanguageToggle";
 
 /**
  * Admin phone + OTP sign-in.
@@ -12,6 +14,7 @@ import { api, setRole, setToken } from "./api";
  * A non-admin who signs in is caught by App and shown a clear message.
  */
 export function Login({ onSignedIn }: { onSignedIn: () => void }) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [code, setCode] = useState("");
@@ -27,9 +30,9 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
       const res = await api.requestOtp(phoneNumber);
       if (res.devCode) {
         setCode(res.devCode);
-        setNotice(`Development mode: your code is ${res.devCode}`);
+        setNotice(t("login.devCode", { code: res.devCode }));
       } else {
-        setNotice("We sent a code to your phone.");
+        setNotice(t("login.codeSent"));
       }
       setStep("code");
     } catch (err) {
@@ -60,10 +63,13 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="auth-shell">
       <div className="card auth-card">
+        <div className="auth-toggle">
+          <LanguageToggle />
+        </div>
         <h1 className="brand">
-          Half-Dinar <span>Shops</span>
+          {t("brand.name")} <span>{t("brand.accent")}</span>
         </h1>
-        <p className="muted">Admin console</p>
+        <p className="muted">{t("login.adminConsole")}</p>
 
         {error && (
           <div className="alert error" role="alert">
@@ -74,7 +80,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
 
         {step === "phone" ? (
           <form onSubmit={handleRequestCode}>
-            <label htmlFor="phone">Phone number</label>
+            <label htmlFor="phone">{t("login.phoneNumber")}</label>
             <input
               id="phone"
               value={phoneNumber}
@@ -83,12 +89,12 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
               required
             />
             <button type="submit" disabled={busy}>
-              {busy ? "Sending..." : "Send login code"}
+              {busy ? t("login.sending") : t("login.sendCode")}
             </button>
           </form>
         ) : (
           <form onSubmit={handleVerify}>
-            <label htmlFor="code">6-digit code</label>
+            <label htmlFor="code">{t("login.codeLabel")}</label>
             <input
               id="code"
               value={code}
@@ -99,10 +105,10 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
               required
             />
             <button type="submit" disabled={busy}>
-              {busy ? "Verifying..." : "Sign in"}
+              {busy ? t("login.verifying") : t("login.signIn")}
             </button>
             <button type="button" className="link" onClick={() => setStep("phone")}>
-              Use a different number
+              {t("login.differentNumber")}
             </button>
           </form>
         )}

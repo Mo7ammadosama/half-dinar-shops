@@ -22,7 +22,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { api } from "./api";
+import { LanguageToggle } from "./i18n/LanguageToggle";
 import { colors, font, radius, space } from "./theme";
 
 // Fixed to Amman for the pilot, same as the old dashboard. A map picker can come
@@ -35,6 +37,7 @@ export function LoginScreen({
 }: {
   onSignedIn: (result: { token: string; role: string; userId: string }) => void;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [step, setStep] = useState<"phone" | "code">("phone");
 
@@ -58,7 +61,7 @@ export function LoginScreen({
         locationLng: PILOT_LNG,
         openingHours,
       });
-      setNotice("Shop registered. Now sign in with a login code.");
+      setNotice(t("login.shopRegistered"));
       setMode("login");
       setStep("phone");
     } catch (err) {
@@ -75,9 +78,9 @@ export function LoginScreen({
       const res = await api.requestOtp(phoneNumber);
       if (res.devCode) {
         setCode(res.devCode);
-        setNotice(`Development mode — your code is ${res.devCode}`);
+        setNotice(t("login.devCode", { code: res.devCode }));
       } else {
-        setNotice("We sent a code to your phone.");
+        setNotice(t("login.codeSent"));
       }
       setStep("code");
     } catch (err) {
@@ -106,10 +109,13 @@ export function LoginScreen({
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.toggleRow}>
+          <LanguageToggle />
+        </View>
         <Text style={styles.brand}>
-          Half-Dinar <Text style={styles.brandAccent}>Merchant</Text>
+          {t("login.brand")} <Text style={styles.brandAccent}>{t("login.brandRole")}</Text>
         </Text>
-        <Text style={styles.tagline}>Run your shop from your phone.</Text>
+        <Text style={styles.tagline}>{t("login.tagline")}</Text>
 
         {error && (
           <View style={[styles.alert, styles.alertError]} testID="login-error">
@@ -124,7 +130,7 @@ export function LoginScreen({
 
         {mode === "register" ? (
           <View style={styles.card}>
-            <Text style={styles.label}>Shop name</Text>
+            <Text style={styles.label}>{t("login.shopName")}</Text>
             <TextInput
               style={styles.input}
               value={shopName}
@@ -133,7 +139,7 @@ export function LoginScreen({
               placeholderTextColor={colors.faint}
               testID="reg-shop-name"
             />
-            <Text style={styles.label}>Phone number</Text>
+            <Text style={styles.label}>{t("login.phoneNumber")}</Text>
             <TextInput
               style={styles.input}
               value={phoneNumber}
@@ -143,7 +149,7 @@ export function LoginScreen({
               keyboardType="phone-pad"
               testID="reg-phone"
             />
-            <Text style={styles.label}>Opening hours</Text>
+            <Text style={styles.label}>{t("login.openingHours")}</Text>
             <TextInput
               style={styles.input}
               value={openingHours}
@@ -161,7 +167,7 @@ export function LoginScreen({
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>Register shop</Text>
+                <Text style={styles.buttonText}>{t("login.registerShop")}</Text>
               )}
             </TouchableOpacity>
             <TouchableOpacity
@@ -172,12 +178,12 @@ export function LoginScreen({
               }}
               testID="to-login"
             >
-              <Text style={styles.link}>Already registered? Sign in</Text>
+              <Text style={styles.link}>{t("login.alreadyRegistered")}</Text>
             </TouchableOpacity>
           </View>
         ) : step === "phone" ? (
           <View style={styles.card}>
-            <Text style={styles.label}>Your phone number</Text>
+            <Text style={styles.label}>{t("login.yourPhone")}</Text>
             <TextInput
               style={styles.input}
               value={phoneNumber}
@@ -188,7 +194,7 @@ export function LoginScreen({
               autoComplete="tel"
               testID="phone-input"
             />
-            <Text style={styles.hint}>We'll text you a code to sign in.</Text>
+            <Text style={styles.hint}>{t("login.textHint")}</Text>
             <TouchableOpacity
               style={[styles.button, (busy || !phoneNumber) && styles.buttonDisabled]}
               onPress={handleRequestCode}
@@ -198,7 +204,7 @@ export function LoginScreen({
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>Send code</Text>
+                <Text style={styles.buttonText}>{t("login.sendCode")}</Text>
               )}
             </TouchableOpacity>
             <TouchableOpacity
@@ -209,12 +215,12 @@ export function LoginScreen({
               }}
               testID="to-register"
             >
-              <Text style={styles.link}>New shop? Register here</Text>
+              <Text style={styles.link}>{t("login.newShop")}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.card}>
-            <Text style={styles.label}>Enter the 6-digit code</Text>
+            <Text style={styles.label}>{t("login.enterCode")}</Text>
             <TextInput
               style={[styles.input, styles.codeInput]}
               value={code}
@@ -226,7 +232,7 @@ export function LoginScreen({
               autoComplete="sms-otp"
               testID="code-input"
             />
-            <Text style={styles.hint}>Sent to {phoneNumber}</Text>
+            <Text style={styles.hint}>{t("login.sentTo", { phone: phoneNumber })}</Text>
             <TouchableOpacity
               style={[styles.button, (busy || code.length !== 6) && styles.buttonDisabled]}
               onPress={handleVerify}
@@ -236,7 +242,7 @@ export function LoginScreen({
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>Sign in</Text>
+                <Text style={styles.buttonText}>{t("login.signIn")}</Text>
               )}
             </TouchableOpacity>
             <TouchableOpacity
@@ -248,7 +254,7 @@ export function LoginScreen({
               }}
               testID="change-number"
             >
-              <Text style={styles.link}>Use a different number</Text>
+              <Text style={styles.link}>{t("login.differentNumber")}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -260,6 +266,7 @@ export function LoginScreen({
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   container: { flexGrow: 1, justifyContent: "center", padding: 24 },
+  toggleRow: { alignItems: "center", marginBottom: space.xl },
   brand: { ...font.display, color: colors.ink, textAlign: "center" },
   brandAccent: { color: colors.brand },
   tagline: {

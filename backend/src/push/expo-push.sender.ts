@@ -54,7 +54,14 @@ export class ExpoPushSender implements PushSender {
           // An order update is worth waking the screen for; it is time-critical
           // and the customer is actively waiting on it.
           priority: "high",
-          sound: "default",
+          // "default" plays the device's default sound. A new order must never
+          // be silent — the shopkeeper is not staring at the phone.
+          sound: message.sound ?? "default",
+          // CRITICAL for Android sound: without a channelId Expo delivers through
+          // its silent fallback channel and the sound above is ignored. Routed to
+          // the high-importance, sound-enabled channel the app creates. Harmless
+          // on iOS (which has no channels — the payload `sound` drives it there).
+          ...(message.channelId ? { channelId: message.channelId } : {}),
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });

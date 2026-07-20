@@ -1,0 +1,100 @@
+{
+  "lang": {
+    "toggleA11y": "تغيير اللغة",
+    "ar": "عربي",
+    "en": "EN"
+  },
+  "brand": {
+    "name": "نصف دينار",
+    "accent": "متاجر"
+  },
+  "login": {
+    "adminConsole": "لوحة الإدارة",
+    "phoneNumber": "رقم الهاتف",
+    "sendCode": "إرسال رمز الدخول",
+    "sending": "جارٍ الإرسال...",
+    "codeSent": "أرسلنا رمزًا إلى هاتفك.",
+    "devCode": "وضع التطوير: رمزك هو {{code}}",
+    "codeLabel": "الرمز المكوّن من 6 أرقام",
+    "signIn": "تسجيل الدخول",
+    "verifying": "جارٍ التحقق...",
+    "differentNumber": "استخدم رقمًا آخر"
+  },
+  "app": {
+    "adminConsole": "لوحة الإدارة",
+    "notAdmin": "هذه اللوحة للمشرفين فقط. إذا كنت صاحب متجر، استخدم تطبيق تاجر نصف دينار على هاتفك.",
+    "signOut": "تسجيل الخروج",
+    "adminPanel": "لوحة الإدارة"
+  },
+  "admin": {
+    "status": {
+      "PENDING": "بانتظار الموافقة",
+      "APPROVED": "مقبول",
+      "SUSPENDED": "موقوف"
+    },
+    "orderStatus": {
+      "PENDING": "قيد الانتظار",
+      "CONFIRMED": "مؤكّد",
+      "PREPARING": "قيد التجهيز",
+      "DELIVERING": "قيد التوصيل",
+      "DELIVERED": "تم التسليم",
+      "CANCELLED": "ملغى"
+    },
+    "by": {
+      "merchant": "المتجر",
+      "customer": "الزبون",
+      "system": "النظام"
+    },
+    "overview": "نظرة عامة",
+    "statsAwaiting": "متجر بانتظار الموافقة",
+    "statsApproved": "مقبول",
+    "statsOrders": "طلب",
+    "statsCancelled": "ملغى",
+    "statsDelivered": "تم تسليمه",
+    "statsFrom": "من",
+    "statsReviews": "تقييم",
+    "tabShops": "المتاجر",
+    "tabCategories": "الفئات",
+    "tabOrders": "كل الطلبات",
+    "tabIgnored": "لم يُرد عليها",
+    "shops": "المتاجر",
+    "noShops": "لا توجد متاجر مسجّلة بعد.",
+    "thShop": "المتجر",
+    "thPhone": "الهاتف",
+    "thProducts": "المنتجات",
+    "thOrders": "الطلبات",
+    "thStatus": "الحالة",
+    "approve": "موافقة",
+    "reject": "رفض",
+    "suspend": "إيقاف",
+    "masterCategories": "الفئات الرئيسية",
+    "masterCategoriesSub": "مشتركة بين جميع المتاجر. يختار التجار منها ولا يمكنهم تعديلها.",
+    "newCategory": "فئة جديدة",
+    "newCategoryPlaceholder": "مثال: العناية بالأطفال",
+    "inside": "ضمن",
+    "topLevel": "المستوى الأعلى",
+    "addCategory": "إضافة فئة",
+    "thCategory": "الفئة",
+    "thSubcategories": "الفئات الفرعية",
+    "rename": "إعادة تسمية",
+    "delete": "حذف",
+    "renamePrompt": "إعادة تسمية «{{name}}» إلى:",
+    "deleteConfirm": "حذف «{{path}}»؟",
+    "ignoredTitle": "طلبات لم يرد عليها المتجر",
+    "ignoredEmpty": "لا شيء بالانتظار. كل الطلبات استلمتها متاجرها.",
+    "ignoredWarning": "هؤلاء الزبائن ينتظرون ولم يؤكّد المتجر طلبهم. اتصل بالمتجر. يمكن للزبون الإلغاء مجانًا.",
+    "thWaiting": "الانتظار",
+    "thCallShop": "اتصل بالمتجر",
+    "thCustomer": "الزبون",
+    "thItems": "العناصر",
+    "thTotal": "الإجمالي",
+    "allOrders": "كل الطلبات",
+    "cancellationsOnly": "الملغاة فقط",
+    "noOrders": "لا توجد طلبات لعرضها.",
+    "thPlaced": "التاريخ",
+    "thNotes": "ملاحظات",
+    "jod": "{{value}} د.أ",
+    "waitingMin": "{{count}} دقيقة",
+    "waitingHm": "{{h}} س {{m}} د"
+  }
+}

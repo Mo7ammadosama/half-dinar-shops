@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { api, type Order } from "./api";
 import { cartItemsTotal, multiplyMoney, type CartLine } from "./cart";
 import { colors } from "./theme";
@@ -47,6 +48,7 @@ export function CartScreen({
   onRemove: (productId: string) => void;
   onOrderPlaced: (order: Order) => void;
 }) {
+  const { t } = useTranslation();
   const [deliveryFee, setDeliveryFee] = useState<string | null>(null);
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,9 +92,9 @@ export function CartScreen({
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.flex}>
         <View style={styles.header}>
-          <Text style={styles.title}>Your basket</Text>
+          <Text style={styles.title}>{t("cart.title")}</Text>
           <TouchableOpacity onPress={onClose} testID="cart-close">
-            <Text style={styles.close}>Close</Text>
+            <Text style={styles.close}>{t("common.close")}</Text>
           </TouchableOpacity>
         </View>
 
@@ -104,8 +106,8 @@ export function CartScreen({
 
         {lines.length === 0 ? (
           <View style={styles.centered} testID="cart-empty">
-            <Text style={styles.emptyTitle}>Your basket is empty</Text>
-            <Text style={styles.emptyBody}>Add some items from the shop.</Text>
+            <Text style={styles.emptyTitle}>{t("cart.emptyTitle")}</Text>
+            <Text style={styles.emptyBody}>{t("cart.emptyBody")}</Text>
           </View>
         ) : (
           <>
@@ -116,7 +118,7 @@ export function CartScreen({
                     <Text style={styles.lineName} testID="cart-line-name">
                       {line.name}
                     </Text>
-                    <Text style={styles.lineUnit}>{line.displayPrice} JOD each</Text>
+                    <Text style={styles.lineUnit}>{t("cart.eachPrice", { price: line.displayPrice })}</Text>
                   </View>
 
                   <View style={styles.stepper}>
@@ -140,36 +142,36 @@ export function CartScreen({
                   </View>
 
                   <Text style={styles.lineTotal} testID={`cart-line-total-${line.name}`}>
-                    {multiplyMoney(line.displayPrice, line.quantity)} JOD
+                    {t("cart.lineTotal", { total: multiplyMoney(line.displayPrice, line.quantity) })}
                   </Text>
                 </View>
               ))}
             </ScrollView>
 
             <View style={styles.summary}>
-              <Text style={styles.summaryShop}>Delivered from {shopName}</Text>
+              <Text style={styles.summaryShop}>{t("cart.deliveredFrom", { shop: shopName })}</Text>
 
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Items</Text>
+                <Text style={styles.summaryLabel}>{t("cart.items")}</Text>
                 <Text style={styles.summaryValue} testID="summary-items">
-                  {itemsTotal} JOD
+                  {t("cart.valueJod", { value: itemsTotal })}
                 </Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Delivery</Text>
+                <Text style={styles.summaryLabel}>{t("cart.delivery")}</Text>
                 <Text style={styles.summaryValue} testID="summary-delivery">
-                  {deliveryFee ? `${deliveryFee} JOD` : "…"}
+                  {deliveryFee ? t("cart.valueJod", { value: deliveryFee }) : "…"}
                 </Text>
               </View>
               <View style={[styles.summaryRow, styles.summaryTotalRow]}>
-                <Text style={styles.summaryTotalLabel}>Total to pay</Text>
+                <Text style={styles.summaryTotalLabel}>{t("cart.totalToPay")}</Text>
                 <Text style={styles.summaryTotalValue} testID="summary-total">
-                  {total ? `${total} JOD` : "…"}
+                  {total ? t("cart.valueJod", { value: total }) : "…"}
                 </Text>
               </View>
 
               <Text style={styles.cod} testID="payment-method">
-                Pay with cash on delivery
+                {t("cart.cod")}
               </Text>
 
               <TouchableOpacity
@@ -181,7 +183,7 @@ export function CartScreen({
                 {placing ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.confirmText}>Place order</Text>
+                  <Text style={styles.confirmText}>{t("cart.placeOrder")}</Text>
                 )}
               </TouchableOpacity>
             </View>

@@ -6,6 +6,7 @@
  * what was ordered or what it costs.
  */
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import type { Order } from "./api";
 import { colors } from "./theme";
 
@@ -16,6 +17,7 @@ export function OrderPlacedScreen({
   order: Order | null;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   if (!order) return null;
 
   return (
@@ -26,49 +28,49 @@ export function OrderPlacedScreen({
         </View>
 
         <Text style={styles.title} testID="order-placed-title">
-          Order placed
+          {t("placed.title")}
         </Text>
-        <Text style={styles.subtitle}>
-          {order.shop.shopName} is picking your items now. Pay cash when it arrives.
-        </Text>
+        <Text style={styles.subtitle}>{t("placed.subtitle", { shop: order.shop.shopName })}</Text>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>What you ordered</Text>
+          <Text style={styles.cardTitle}>{t("placed.whatOrdered")}</Text>
           {order.items.map((item) => (
             <View key={item.id} style={styles.row} testID="placed-item">
               <Text style={styles.rowName}>
-                {item.quantity} × {item.name}
+                {t("placed.itemLine", { quantity: item.quantity, name: item.name })}
               </Text>
-              <Text style={styles.rowValue}>{item.lineTotal} JOD</Text>
+              <Text style={styles.rowValue}>{t("placed.lineTotal", { total: item.lineTotal })}</Text>
             </View>
           ))}
 
           <View style={[styles.row, styles.divider]}>
-            <Text style={styles.rowLabel}>Items</Text>
+            <Text style={styles.rowLabel}>{t("placed.items")}</Text>
             <Text style={styles.rowValue} testID="placed-items-total">
-              {order.itemsTotal} JOD
+              {t("placed.lineTotal", { total: order.itemsTotal })}
             </Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.rowLabel}>Delivery</Text>
+            <Text style={styles.rowLabel}>{t("placed.delivery")}</Text>
             <Text style={styles.rowValue} testID="placed-delivery">
-              {order.deliveryFee} JOD
+              {t("placed.lineTotal", { total: order.deliveryFee })}
             </Text>
           </View>
           <View style={[styles.row, styles.divider]}>
-            <Text style={styles.totalLabel}>Total (cash)</Text>
+            <Text style={styles.totalLabel}>{t("placed.totalCash")}</Text>
             <Text style={styles.totalValue} testID="placed-total">
-              {order.totalPrice} JOD
+              {t("placed.lineTotal", { total: order.totalPrice })}
             </Text>
           </View>
         </View>
 
         <Text style={styles.status} testID="placed-status">
-          Status: {order.status === "PENDING" ? "Waiting for the shop to confirm" : order.status}
+          {t("placed.statusLine", {
+            status: order.status === "PENDING" ? t("orders.status.PENDING") : order.status,
+          })}
         </Text>
 
         <TouchableOpacity style={styles.button} onPress={onDone} testID="order-done">
-          <Text style={styles.buttonText}>Back to the shop</Text>
+          <Text style={styles.buttonText}>{t("placed.backToShop")}</Text>
         </TouchableOpacity>
       </ScrollView>
     </Modal>

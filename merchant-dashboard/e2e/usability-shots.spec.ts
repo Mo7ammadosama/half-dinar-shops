@@ -11,6 +11,7 @@
  * run explicitly.
  */
 import { test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const SHOTS = "e2e/screenshots";
 
@@ -23,6 +24,8 @@ async function signIn(page: Page, phone: string) {
 }
 
 test.describe("Usability walk-through", () => {
+  test.beforeEach(async ({ page }) => forceEnglish(page));
+
   test.setTimeout(60_000);
 
   test("admin: the overview", async ({ page }) => {

@@ -16,6 +16,7 @@
  * Run with: npm run test:e2e
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 /**
  * A unique phone number from the reserved test range, so repeat runs never
@@ -58,6 +59,8 @@ async function signIn(page: Page, phone: string) {
   await signInToList(page, phone);
   await enterShop(page, "Al-Nus Dinar Shop");
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test.describe("Customer app", () => {
   test("a brand-new customer can sign up with just a phone number and reach the shop", async ({

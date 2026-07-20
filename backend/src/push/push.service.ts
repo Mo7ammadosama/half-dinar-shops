@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { PUSH_SENDER, PushSendError, type PushSender } from "./push.types";
+import { PUSH_SENDER, PushSendError, type PushMessage, type PushSender } from "./push.types";
 
 /**
  * Sends a notification to every device a customer is signed in on.
@@ -51,7 +51,10 @@ export class PushService {
    */
   async notifyUser(
     userId: string,
-    message: { title: string; body: string; data?: Record<string, string> },
+    // Everything about a message except its destination token — includes the
+    // Android channelId + sound, so callers can route order pushes to the
+    // sound-enabled channel (see NotificationsService.ORDER_PUSH_CHANNEL_ID).
+    message: Omit<PushMessage, "to">,
   ): Promise<number> {
     let devices: Array<{ token: string }>;
     try {

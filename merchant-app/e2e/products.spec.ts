@@ -12,6 +12,7 @@
  * of each test, so they never linger in the dev database.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const SEEDED_MERCHANT = "0791234567";
 
@@ -26,6 +27,8 @@ async function signIn(page: Page) {
 }
 
 test.describe("Merchant products", () => {
+  test.beforeEach(async ({ page }) => forceEnglish(page));
+
   test("add a product, edit its price, toggle stock, then delete it", async ({ page }) => {
     await signIn(page);
 

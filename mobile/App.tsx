@@ -12,6 +12,8 @@ import type { Place } from "./src/location";
 import { registerForPush, unregisterFromPush } from "./src/push";
 import { ShopsScreen } from "./src/ShopsScreen";
 import { clearToken, loadArea, loadToken, saveArea, saveToken } from "./src/storage";
+// Initialises i18next as a side effect, and exposes the startup restore.
+import { restoreLanguage } from "./src/i18n";
 import { colors } from "./src/theme";
 
 export default function App() {
@@ -28,6 +30,9 @@ export default function App() {
   // Restore the saved session on launch so a returning customer skips login.
   useEffect(() => {
     void (async () => {
+      // Restore the saved language BEFORE the first screen renders (the splash
+      // below covers this while token === undefined), so it never flashes the default.
+      await restoreLanguage();
       const [saved, savedArea] = await Promise.all([loadToken(), loadArea()]);
       setAuthToken(saved);
       setArea(savedArea);

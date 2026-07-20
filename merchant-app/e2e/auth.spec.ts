@@ -13,6 +13,7 @@
  * :8081, database seeded.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 
 const SEEDED_MERCHANT = "0791234567";
 const SEEDED_CUSTOMER = "0791111111";
@@ -33,6 +34,8 @@ async function signIn(page: Page, phone: string) {
 }
 
 test.describe("Merchant app auth", () => {
+  test.beforeEach(async ({ page }) => forceEnglish(page));
+
   test("a seeded merchant signs in and lands on their dashboard", async ({ page }) => {
     await signIn(page, SEEDED_MERCHANT);
     await expect(page.getByTestId("merchant-header")).toBeVisible({ timeout: 15_000 });

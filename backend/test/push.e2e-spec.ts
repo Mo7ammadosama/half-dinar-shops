@@ -55,7 +55,7 @@ describe("Customer push notifications (blocker B6)", () => {
 
     afterEach(() => jest.restoreAllMocks());
 
-    it("posts the notification to Expo with a high priority and a sound", async () => {
+    it("posts the notification to Expo with a high priority, a sound AND a channel", async () => {
       const fetchMock = jest
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(
@@ -69,6 +69,7 @@ describe("Customer push notifications (blocker B6)", () => {
         title: "Your order was cancelled",
         body: "The shop cancelled your order: closing early",
         data: { orderId: "order-1" },
+        channelId: "orders-v2",
       });
 
       expect(result).toEqual({ provider: "expo", messageId: "receipt-1" });
@@ -84,6 +85,26 @@ describe("Customer push notifications (blocker B6)", () => {
       // silent, low-priority notification would defeat the point.
       expect(body.priority).toBe("high");
       expect(body.sound).toBe("default");
+      // CRITICAL: without channelId, Android delivers through its silent fallback
+      // channel and the sound above is ignored — the exact cause of the silent
+      // new-order notification. It must reach the sound-enabled channel.
+      expect(body.channelId).toBe("orders-v2");
+    });
+
+    it("still sends a sound when the caller omits channelId (iOS path)", async () => {
+      // iOS has no channels — the payload sound drives it. The channelId key
+      // must simply be absent rather than sent as undefined.
+      const fetchMock = jest
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          new Response(JSON.stringify({ data: { id: "r", status: "ok" } }), { status: 200 }),
+        );
+
+      await sender().send({ to: TOKEN, title: "t", body: "b" });
+
+      const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+      expect(body.sound).toBe("default");
+      expect("channelId" in body).toBe(false);
     });
 
     it("treats Expo's 200-with-status-error as a FAILURE, not a success", async () => {
@@ -323,6 +344,8 @@ describe("Customer push notifications (blocker B6)", () => {
         userId,
         expect.objectContaining({
           body: expect.stringContaining("We are closing early today"),
+          // Customer order pushes must ride the sound-enabled channel too.
+          channelId: "orders-v2",
         }),
       );
       jest.restoreAllMocks();
@@ -442,6 +465,9 @@ describe("Customer push notifications (blocker B6)", () => {
       const message = outbox.lastMessageTo("ExponentPushToken[shopkeeper]");
       expect(message).toBeDefined();
       expect(message?.title).toBe("New order");
+      // The push MUST carry the sound-enabled channel id, or it lands silently
+      // on the shopkeeper's Android phone — the bug this fix closes.
+      expect(message?.channelId).toBe("orders-v2");
 
       // Remove the order before the customer — the order FK-references the user.
       await prisma.orderItem.deleteMany({ where: { orderId: placed.body.id } });

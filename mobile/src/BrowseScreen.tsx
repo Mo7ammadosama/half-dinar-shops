@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { api, imageSrc, type Order, type Product, type Shop, type ShopCategory } from "./api";
 import { cartCount, cartItemsTotal, useCart } from "./cart";
 import { CartScreen } from "./CartScreen";
@@ -27,6 +28,7 @@ import { productEmoji, tileTint } from "./shopVisuals";
 import { colors, font, radius, shadow, space } from "./theme";
 
 export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void }) {
+  const { t } = useTranslation();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ShopCategory[]>([]);
   const [search, setSearch] = useState("");
@@ -86,13 +88,13 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
         <View style={styles.header}>
           <View style={styles.headerRow}>
             <TouchableOpacity onPress={onBack} testID="back-to-shops" hitSlop={12}>
-              <Text style={styles.back}>‹ Shops</Text>
+              <Text style={styles.back}>{t("browse.backShops")}</Text>
             </TouchableOpacity>
           </View>
         </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.brand} />
-          <Text style={styles.loadingText}>Loading the shelf…</Text>
+          <Text style={styles.loadingText}>{t("browse.loadingShelf")}</Text>
         </View>
       </View>
     );
@@ -106,7 +108,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
             <Text style={styles.back}>‹ Shops</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setOrdersOpen(true)} testID="open-orders">
-            <Text style={styles.headerLink}>My orders</Text>
+            <Text style={styles.headerLink}>{t("browse.myOrders")}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -115,7 +117,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
         <View style={styles.errorBanner} testID="browse-error">
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity onPress={handleRefresh}>
-            <Text style={styles.retry}>Retry</Text>
+            <Text style={styles.retry}>{t("common.retry")}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -132,7 +134,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
                 {shop.shopName}
               </Text>
               <Text style={styles.shopMeta}>
-                Open {shop.openingHours} · {shop.productCount} items · Cash on delivery
+                {t("browse.shopMeta", { hours: shop.openingHours, count: shop.productCount })}
               </Text>
             </View>
 
@@ -142,7 +144,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
                 style={styles.search}
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Search for an item…"
+                placeholder={t("browse.searchPlaceholder")}
                 placeholderTextColor={colors.faint}
                 testID="search-input"
               />
@@ -159,7 +161,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
                 testID="chip-all"
               >
                 <Text style={[styles.chipText, categoryId === null && styles.chipTextActive]}>
-                  All
+                  {t("browse.all")}
                 </Text>
               </TouchableOpacity>
 
@@ -171,7 +173,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
                   testID={`chip-${c.name}`}
                 >
                   <Text style={[styles.chipText, categoryId === c.id && styles.chipTextActive]}>
-                    {c.name} ({c.productCount})
+                    {t("browse.chipCategory", { name: c.name, count: c.productCount })}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -196,14 +198,14 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
                 {item.categoryPath}
               </Text>
               <Text style={styles.price} testID="product-price">
-                {item.price} JOD
+                {t("browse.priceUnit", { price: item.price })}
               </Text>
             </View>
 
             <View style={styles.productRight}>
               {!item.isAvailable ? (
                 <Text style={styles.outBadge} testID="out-of-stock">
-                  Out of stock
+                  {t("browse.outOfStock")}
                 </Text>
               ) : cart.quantityOf(item.id) > 0 ? (
                 <View style={styles.stepper}>
@@ -231,7 +233,7 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
                   onPress={() => cart.add(item, shop.id)}
                   testID={`add-${item.name}`}
                 >
-                  <Text style={styles.addButtonText}>Add</Text>
+                  <Text style={styles.addButtonText}>{t("browse.add")}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -240,8 +242,8 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
         ListEmptyComponent={
           <View style={styles.centered} testID="no-results">
             <Text style={styles.emptyEmoji}>🔍</Text>
-            <Text style={styles.emptyTitle}>Nothing found</Text>
-            <Text style={styles.emptyBody}>Try a different search or category.</Text>
+            <Text style={styles.emptyTitle}>{t("browse.nothingFoundTitle")}</Text>
+            <Text style={styles.emptyBody}>{t("browse.nothingFoundBody")}</Text>
           </View>
         }
       />
@@ -254,9 +256,9 @@ export function BrowseScreen({ shop, onBack }: { shop: Shop; onBack: () => void 
               {cartCount(cartForShop)}
             </Text>
           </View>
-          <Text style={styles.basketLabel}>View basket</Text>
+          <Text style={styles.basketLabel}>{t("browse.viewBasket")}</Text>
           <Text style={styles.basketTotal} testID="basket-total">
-            {cartItemsTotal(cartForShop)} JOD
+            {t("browse.basketTotal", { total: cartItemsTotal(cartForShop) })}
           </Text>
         </TouchableOpacity>
       )}

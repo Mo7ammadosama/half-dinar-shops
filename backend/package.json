@@ -24,6 +24,7 @@
     "seed:demo-orders": "ts-node prisma/seed-demo-orders.ts",
     "verify": "ts-node prisma/verify.ts",
     "db:clean-test-data": "ts-node prisma/clean-test-data.ts",
+    "db:reset-orders": "ts-node prisma/reset-orders.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",

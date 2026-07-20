@@ -10,6 +10,7 @@
  * Prerequisites: API :3000, expo web :8081, database seeded (incl. demo shops).
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 import {
   assignDelivery,
   confirmOrder,
@@ -60,6 +61,8 @@ async function closeCustomerOrder(page: Page) {
   await page.getByTestId("orders-close").click(); // back to list
   await page.getByTestId("orders-close").click(); // close list
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test.describe("Manual delivery tracking", () => {
   test("an order walks through every delivery status and the customer sees each one", async ({

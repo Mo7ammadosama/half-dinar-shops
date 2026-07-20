@@ -16,6 +16,20 @@ import { PushService } from "../push/push.service";
  * the phone could be reached, so a delivery failure must never propagate back
  * into the operation that triggered it.
  */
+/**
+ * The Android notification channel every order push is routed through.
+ *
+ * A FRESH id ("orders-v2"), deliberately NOT the original "orders". Android
+ * notification channels are IMMUTABLE after first creation — re-declaring an
+ * existing channel with new settings (adding a sound) is a silent no-op on any
+ * phone that already has it. The first build created "orders" with no explicit
+ * sound, so reusing that id would leave already-installed phones silent forever.
+ * A new id is guaranteed to be created fresh with the sound-enabled config in
+ * each app's src/push.ts. Keep this string identical to the channel id both the
+ * merchant app and the customer app create.
+ */
+export const ORDER_PUSH_CHANNEL_ID = "orders-v2";
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -48,6 +62,9 @@ export class NotificationsService {
         title: "New order",
         body: "A customer just placed an order. Open the app to confirm it.",
         data: { orderId, kind: "new_order" },
+        // Route through the sound-enabled channel so the shopkeeper HEARS it on
+        // a closed/locked phone — the whole point of this notification.
+        channelId: ORDER_PUSH_CHANNEL_ID,
       })
       .catch((error) =>
         this.logger.warn(`New-order push failed for merchant ${merchantUserId}: ${String(error)}`),
@@ -130,7 +147,7 @@ export class NotificationsService {
     message: { title: string; body: string },
   ) {
     void this.push
-      .notifyUser(customerId, { ...message, data: { orderId } })
+      .notifyUser(customerId, { ...message, data: { orderId }, channelId: ORDER_PUSH_CHANNEL_ID })
       .catch((error) =>
         this.logger.warn(`Push failed for customer ${customerId}: ${String(error)}`),
       );

@@ -11,6 +11,7 @@
  * Prerequisites: API :3000, expo web :8081, database seeded (incl. demo shops).
  */
 import { expect, test, type Page } from "@playwright/test";
+import { forceEnglish } from "./lang";
 import {
   cancelOrder,
   confirmOrder,
@@ -49,6 +50,8 @@ async function placeOrder(page: Page, items: Array<{ name: string; extra?: numbe
   await expect(page.getByTestId("order-placed-title")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("order-done").click();
 }
+
+test.beforeEach(async ({ page }) => forceEnglish(page));
 
 test.describe("Full order cycle across both apps", () => {
   test("customer orders, shop confirms and picks, customer sees each step", async ({ page }) => {
