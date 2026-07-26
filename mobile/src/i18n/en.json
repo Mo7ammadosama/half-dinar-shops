@@ -35,6 +35,8 @@
     "change": "Change",
     "set": "Set",
     "findingShops": "Finding shops…",
+    "stillConnecting": "Still connecting to the server…",
+    "cantConnectTitle": "Can't reach the shops right now",
     "noShopsTitle": "No shops open yet",
     "noShopsBody": "We're adding shops in your area. Please check back soon.",
     "countOne": "{{count}} shop",

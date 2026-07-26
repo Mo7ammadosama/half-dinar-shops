@@ -192,6 +192,32 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+/**
+ * Runs a request, retrying ONLY on a connection failure (ApiError status 0) with
+ * a short linear backoff (1s, 2s, 3s → ~6s over 4 attempts). For landing-screen
+ * loads, so a backend that is still starting up self-heals instead of stranding
+ * a non-technical user who launched the app before the server was ready.
+ *
+ * It never retries a non-zero status — a real 4xx/5xx is not "still starting" —
+ * and must only wrap idempotent GETs, so there is no risk of double-submitting.
+ * `onAttempt` lets the UI show "still connecting…" between tries.
+ */
+export async function withConnectRetry<T>(
+  fn: () => Promise<T>,
+  { attempts = 4, onRetry }: { attempts?: number; onRetry?: (nextAttempt: number) => void } = {},
+): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 0 || i >= attempts - 1) throw err;
+      onRetry?.(i + 2);
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+}
+
 export const api = {
   requestOtp: (phoneNumber: string) =>
     call<{ expiresInSeconds: number; devCode?: string }>("/auth/otp/request", {

@@ -238,9 +238,11 @@ test.describe("Customer app", () => {
     // It did not silently pretend to succeed.
     await expect(page.getByTestId("shop-card")).toHaveCount(0);
 
-    // Network returns; the customer taps Retry and the shops load.
+    // Network returns; the customer taps Retry and the shops load. (There are now
+    // two Retry affordances — the top banner and the centred can't-connect state;
+    // scope to the banner's to stay unambiguous.)
     await page.unroute(shopsList);
-    await page.getByText("Retry").click();
+    await page.getByTestId("shops-error").getByText("Retry").click();
 
     await expect(
       page.getByTestId("shop-card").filter({ hasText: "Al-Nus Dinar Shop" }),

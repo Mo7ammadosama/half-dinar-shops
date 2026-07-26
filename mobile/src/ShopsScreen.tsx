@@ -22,7 +22,7 @@ import {
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
-import { api, type Shop } from "./api";
+import { api, withConnectRetry, type Shop } from "./api";
 import { LanguageToggle } from "./i18n/LanguageToggle";
 import {
   distanceKm,
@@ -58,6 +58,10 @@ export function ShopsScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while auto-retrying a connection that failed — lets the spinner say
+  // "still connecting" instead of silently hanging, so a cold backend that comes
+  // up within a few seconds self-heals without the customer doing anything.
+  const [connecting, setConnecting] = useState(false);
 
   const [areaPickerOpen, setAreaPickerOpen] = useState(false);
   const [locationBusy, setLocationBusy] = useState(false);
@@ -66,8 +70,13 @@ export function ShopsScreen({
   const load = useCallback(async () => {
     setError(null);
     try {
-      setShops(await api.listShops());
+      const list = await withConnectRetry(() => api.listShops(), {
+        onRetry: () => setConnecting(true),
+      });
+      setShops(list);
+      setConnecting(false);
     } catch (err) {
+      setConnecting(false);
       setError((err as Error).message);
     }
   }, []);
@@ -183,7 +192,19 @@ export function ShopsScreen({
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.brand} />
-          <Text style={styles.loadingText}>{t("shops.findingShops")}</Text>
+          <Text style={styles.loadingText}>
+            {connecting ? t("shops.stillConnecting") : t("shops.findingShops")}
+          </Text>
+        </View>
+      ) : error ? (
+        // A load error already shows the retry banner above; don't ALSO claim
+        // "no shops exist", which would be a different and wrong message.
+        <View style={styles.centered} testID="shops-load-error">
+          <Text style={styles.emptyEmoji}>📡</Text>
+          <Text style={styles.emptyTitle}>{t("shops.cantConnectTitle")}</Text>
+          <TouchableOpacity onPress={handleRefresh} testID="shops-error-retry">
+            <Text style={[styles.retry, { marginTop: space.md }]}>{t("common.retry")}</Text>
+          </TouchableOpacity>
         </View>
       ) : shops.length === 0 ? (
         <View style={styles.centered} testID="no-shop">

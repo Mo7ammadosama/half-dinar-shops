@@ -232,6 +232,18 @@ export const api = {
     openingHours: string;
   }) => call<unknown>("/merchants/register", { method: "POST", body: JSON.stringify(data) }),
 
+  /**
+   * The signed-in identity, straight from the token. Works for ANY role and
+   * never 403s — so it, not the merchant profile, is what the app uses on launch
+   * to decide "is this a merchant, someone else, or a token we can't verify yet?"
+   * Returning the phone number lets the app show WHO is signed in, so a restored
+   * session is never a silent surprise.
+   */
+  me: () =>
+    call<{ id: string; phoneNumber: string; role: string; merchantId: string | null }>(
+      "/auth/me",
+    ),
+
   profile: () => call<MerchantProfile>("/merchants/me"),
 
   // --- Push (launch blocker B6b, merchant side) ---

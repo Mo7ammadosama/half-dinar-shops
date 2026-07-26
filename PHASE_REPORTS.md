@@ -2475,3 +2475,87 @@ the "reset-orders → seed" recovery. Every order in the dev DB is test-generate
 
 **No production code was changed beyond the two features** (the push seam for sound + i18n wiring). The
 only backend logic touched is the notification channel routing; everything else is client i18n and tests.
+
+---
+
+## Phase 13 — Product audit + Part-1 bug fixes (session, connection UX, product-list discoverability) ✅
+
+**Autonomous pass (founder away). Every decision logged here.** Full context in `docs/PRODUCT_AUDIT.md`.
+
+### The gate: the stack was brought up and the bugs reproduced, not reasoned about
+
+Postgres + Redis (Docker) were healthy; the backend was booted on `:3000`; merchant and admin logins
+were walked over the real API. The pivotal empirical finding: **`GET /products` returns all 20 products**
+— so "there is no page to see my products" was never a missing feature or a data problem.
+
+### The three reported bugs — root cause and fix
+
+1. **Merchant app "opens into an account that isn't mine" (P0, real).** Root cause in
+   `merchant-app/App.tsx`: `refreshProfile` kept the session as `MERCHANT` on **any** non-401 error —
+   **including a status-0 "server unreachable"**. So launching before the backend was up restored the
+   old token and showed the merchant shell (with the fallback shop name) that nobody had signed into.
+   - **Fix:** rewrote the startup state machine around **`/auth/me`** (works for any role, never 403s)
+     as the identity source of truth. Outcomes: confirmed MERCHANT → shell; confirmed non-merchant →
+     "wrong app"; **401 → sign out; network/other → a `unreachable` reconnect screen with Retry / Sign
+     out — never the shell.** Added a visible **"Signed in as +962…"** identity line to the header and
+     the wrong-app screen, so a restored session is never a silent surprise.
+   - **Proven:** 3 new merchant e2e — identity visible; **sequential logins as two different accounts
+     on one device show the right account, never the previous one**; and **a restored session does NOT
+     open the shop when the server is unreachable, then recovers on Retry**. All green.
+   - **Sabotage-verified:** reintroducing the `else → setSession("merchant")` bug makes the unreachable
+     test **fail**; reverting makes it pass. The test catches the exact bug, not a proxy.
+
+2. **"No product list" (P1, discoverability).** The list always existed — below the add form, and blank
+   when the initial load failed. **Fix:** the Products tab now opens on the **list**, with the add/edit
+   form behind a **"+ Add a product"** toggle (adding keeps the form open for rapid multi-add; editing
+   closes it). A failed list load shows a **Retry**, not a bare empty state. New e2e proves the tab
+   opens on the list with the form hidden until toggled; the 8 existing product tests were updated to
+   open the form first and all pass.
+
+3. **"Cannot reach the shop right now" dead-end (P1, cold-start UX).** That exact string is the
+   **customer** app's connection error (`mobile/src/api.ts`). **Fix:** a shared `withConnectRetry`
+   helper (retries **only** status-0 connection failures, ~6s linear backoff, GET-only so no
+   double-submit) wraps the customer landing load, with a **"Still connecting…"** spinner; and the
+   ShopsScreen no longer shows the misleading "no shops exist" empty state on a load error — it shows a
+   distinct **can't-connect + Retry** state. New `connection.spec.ts` proves the unreachable→Retry→recover
+   path; a pre-existing retry test was updated (the fix added a second Retry affordance).
+
+### Part 3 — scope decisions (deliberate, not omissions)
+
+The apps are Phase-12-complete; the audit found the "unfinished" feel was mostly downstream of the
+connection error. Anchored to real journey walks, the genuine gaps **were** the Part-1 fixes above.
+Explicitly **deferred, with reasons** (see `docs/PRODUCT_AUDIT.md §3`):
+- **Per-product stock quantity** — the schema has only binary `is_available`; real stock counts are a
+  schema + order-decrement feature, not a bug fix, and binary in/out matches how half-dinar variety
+  shops actually restock. Not built.
+- **Server-side i18n** for push/validation text — already a logged Phase-12 follow-up.
+- **Multi-shop admin tooling** — the pilot is one shop by design.
+
+### Test + attack pass — all green (run live, not assumed)
+
+- **Backend: 18 db + 383 e2e (17 suites)** — including **red-team cross-role attacks, attack-surface
+  (injection / invalid transitions / numeric abuse), and OTP/throttle**. The full attack surface holds.
+- **Merchant app: 24 e2e (auth 9 incl. 3 new session tests, products 8 incl. list-first, orders 4,
+  language 3) + 8 jest.**
+- **Customer app: full-lifecycle 1 + customer 16 + connection 1 (new) + shops/ordering/order-cycle/
+  delivery + language 3 + location 4, + 19 jest.** (Two location tests flaked under a 6-minute combined
+  run; both pass in isolation — timing, not a regression.)
+- **Admin console: 13 e2e** (auth 5, escalation 3, language 3, usability 2).
+- **All four projects typecheck clean.**
+
+### Scope & honesty notes
+
+- **No `backend/src` change** — `git diff --stat` shows only `merchant-app/`, `mobile/`, and
+  `docs/PRODUCT_AUDIT.md`. The new merchant identity check reuses the **existing** `/auth/me` endpoint.
+- **Verification is web-target, not device** (same B5/B6b class): the session/keystore behaviour is
+  proven on Expo's web target (which uses AsyncStorage, not the native keystore). The routing logic is
+  fully tested; on-device keystore encryption remains device-pending.
+- **`npm audit` is NOT 0 this pass** (34: 1 moderate / 33 high in both Expo apps). These are **newly
+  published advisories** against the **pinned Expo SDK 54 toolchain** (`tar`, `brace-expansion`, via
+  `expo → @expo/cli` — the build CLI, not shipped app logic). **Not introduced here** (package files
+  untouched) and **not remediable without `npm audit fix --force` → SDK 57, which is forbidden** (breaks
+  Expo Go on the founder's phone). Documented rather than "fixed" destructively. Revisit when the SDK
+  pin is lifted.
+- **DB restored** to the pristine seed (1 shop / 20 products / 0 orders; Energy Drink back to
+  out-of-stock). Note: the seed had drifted (Energy Drink was available, 5 stray orders) from prior
+  sessions — restored via `db:reset-orders` → `db:clean-test-data` → `seed`.

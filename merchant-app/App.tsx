@@ -25,18 +25,31 @@ import { colors, font, radius, shadow, space } from "./src/theme";
 
 type Tab = "orders" | "products";
 
+/**
+ * What we know about the holder of the restored token.
+ *  - "checking": verifying with the server (splash).
+ *  - "merchant": confirmed a MERCHANT — show the shop.
+ *  - "not_merchant": confirmed signed in, but not a shop — show "wrong app".
+ *  - "unreachable": could NOT verify (server down / network). We deliberately do
+ *    NOT reveal the merchant shell here — that was the bug where launching before
+ *    the backend was up restored an old token and showed a merchant screen nobody
+ *    had signed into. Instead we offer Retry / Sign out.
+ */
+type Session = "checking" | "merchant" | "not_merchant" | "unreachable";
+
 export default function App() {
   const { t } = useTranslation();
   // undefined = still restoring; null = signed out.
   const [token, setToken] = useState<string | null | undefined>(undefined);
-  const [role, setRole] = useState<string | null>(null);
+  const [session, setSession] = useState<Session>("checking");
+  const [phone, setPhone] = useState<string | null>(null);
   const [profile, setProfile] = useState<MerchantProfile | null>(null);
   const [tab, setTab] = useState<Tab>("orders");
   const [pending, setPending] = useState(0);
 
-  // Restore a saved session on launch. The role is not persisted separately —
-  // it is re-read from the server via the profile call, which also proves the
-  // token is still a valid MERCHANT token.
+  // Restore a saved session on launch. The role is not persisted — it is proven
+  // by asking the server who this token belongs to (verifySession), so a token
+  // whose role changed, or which we cannot verify, can never open the shop.
   useEffect(() => {
     void (async () => {
       // Restore the saved language BEFORE the first screen renders, so it never
@@ -48,31 +61,59 @@ export default function App() {
     })();
   }, []);
 
-  // Once we have a token, load the profile. A non-merchant token (customer or
-  // admin) fails here with a 403 — which is exactly how we detect "wrong app"
-  // without trusting anything the client says about its own role.
-  const refreshProfile = useCallback(async () => {
+  async function signOut() {
+    await unregisterFromPush().catch(() => undefined);
+    setAuthToken(null);
+    await clearToken();
+    setToken(null);
+    setSession("checking");
+    setPhone(null);
+    setProfile(null);
+    setTab("orders");
+    setPending(0);
+  }
+
+  /**
+   * Confirms the restored/just-signed-in token with the server and decides what
+   * to show. Uses /auth/me (works for any role, never 403s) as the source of
+   * truth for identity + role — so "who am I signed in as" is answered by the
+   * server, never guessed from a client-stored value.
+   */
+  const verifySession = useCallback(async () => {
+    setSession("checking");
     try {
-      setProfile(await api.profile());
-      setRole("MERCHANT");
+      const me = await api.me();
+      setPhone(me.phoneNumber);
+      if (me.role !== "MERCHANT") {
+        // A real, signed-in user — just not a merchant.
+        setSession("not_merchant");
+        return;
+      }
+      // Merchant confirmed. Shop details are a bonus: a transient failure loading
+      // them must not block a merchant we have already positively identified.
+      try {
+        setProfile(await api.profile());
+      } catch {
+        setProfile(null);
+      }
+      setSession("merchant");
     } catch (err) {
       const status = (err as { status?: number }).status;
-      if (status === 403) {
-        // A real, signed-in user — just not a merchant.
-        setRole("NOT_MERCHANT");
-      } else if (status === 401) {
-        // Token expired/revoked — drop it cleanly.
+      if (status === 401) {
+        // Token expired/revoked — drop it cleanly and go to sign-in.
         await signOut();
       } else {
-        // A transient error: keep the merchant in, they can retry.
-        setRole("MERCHANT");
+        // Network (status 0) or server error: we could NOT confirm this session,
+        // so we must not reveal the shop. Offer a retry — the backend is often
+        // just still starting up.
+        setSession("unreachable");
       }
     }
   }, []);
 
   useEffect(() => {
-    if (token) void refreshProfile();
-  }, [token, refreshProfile]);
+    if (token) void verifySession();
+  }, [token, verifySession]);
 
   async function handleSignedIn(result: { token: string; role: string }) {
     setAuthToken(result.token);
@@ -83,20 +124,10 @@ export default function App() {
     if (result.role === "MERCHANT") void registerForPush();
   }
 
-  async function signOut() {
-    await unregisterFromPush().catch(() => undefined);
-    setAuthToken(null);
-    await clearToken();
-    setToken(null);
-    setRole(null);
-    setProfile(null);
-    setTab("orders");
-    setPending(0);
-  }
-
   // --- Render ---
 
-  if (token === undefined) {
+  // Still restoring the token, or verifying it with the server.
+  if (token === undefined || (token && session === "checking")) {
     return (
       <View style={styles.splash}>
         <ActivityIndicator size="large" color={colors.card} />
@@ -114,8 +145,32 @@ export default function App() {
     );
   }
 
+  // Token present but we could not confirm it with the server. Never show the
+  // shell here — offer Retry (backend likely still starting) or a clean exit.
+  if (session === "unreachable") {
+    return (
+      <ErrorBoundary>
+        <SafeAreaView style={styles.wrongApp}>
+          <View style={styles.wrongAppToggle}>
+            <LanguageToggle />
+          </View>
+          <ActivityIndicator size="large" color={colors.brand} style={{ marginBottom: space.lg }} />
+          <Text style={styles.wrongAppTitle}>{t("app.reconnectTitle")}</Text>
+          <Text style={styles.wrongAppBody}>{t("app.reconnectBody")}</Text>
+          <TouchableOpacity style={styles.button} onPress={() => void verifySession()} testID="reconnect-retry">
+            <Text style={styles.buttonText}>{t("app.retry")}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={signOut} testID="reconnect-signout">
+            <Text style={styles.ghostLink}>{t("app.signOut")}</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+        <StatusBar style="dark" />
+      </ErrorBoundary>
+    );
+  }
+
   // Signed in, but not as a merchant — this app is for shops only.
-  if (role === "NOT_MERCHANT") {
+  if (session === "not_merchant") {
     return (
       <ErrorBoundary>
         <SafeAreaView style={styles.wrongApp}>
@@ -123,6 +178,11 @@ export default function App() {
             <LanguageToggle />
           </View>
           <Text style={styles.wrongAppTitle}>{t("app.wrongAppTitle")}</Text>
+          {phone && (
+            <Text style={styles.wrongAppWho} testID="wrong-app-phone">
+              {t("app.signedInAs", { phone })}
+            </Text>
+          )}
           <Text style={styles.wrongAppBody}>{t("app.wrongAppBody")}</Text>
           <TouchableOpacity style={styles.button} onPress={signOut} testID="wrong-app-signout">
             <Text style={styles.buttonText}>{t("app.signOut")}</Text>
@@ -141,6 +201,11 @@ export default function App() {
             <Text style={styles.brand} testID="merchant-header">
               {profile?.shopName ?? t("app.fallbackName")}
             </Text>
+            {phone && (
+              <Text style={styles.headerWho} testID="signed-in-as">
+                {t("app.signedInAs", { phone })}
+              </Text>
+            )}
             {profile && (
               <Text style={styles.headerMeta}>
                 {t("app.headerMeta", {
@@ -223,6 +288,7 @@ const styles = StyleSheet.create({
   headerText: { flex: 1 },
   headerActions: { alignItems: "flex-end", gap: space.sm },
   brand: { ...font.h1, color: colors.card },
+  headerWho: { ...font.tiny, color: colors.brandBorder, marginTop: 2 },
   headerMeta: { ...font.small, color: colors.brandBorder, marginTop: 2 },
   signOut: { ...font.bodyStrong, color: colors.card },
   pendingBanner: {
@@ -261,7 +327,9 @@ const styles = StyleSheet.create({
   },
   wrongAppToggle: { alignItems: "center", marginBottom: space.xl },
   wrongAppTitle: { ...font.h1, color: colors.ink, marginBottom: space.md, textAlign: "center" },
+  wrongAppWho: { ...font.small, color: colors.muted, textAlign: "center", marginBottom: space.md },
   wrongAppBody: { ...font.body, color: colors.muted, textAlign: "center", marginBottom: space.xl },
   button: { backgroundColor: colors.brand, borderRadius: radius.sm, paddingVertical: 14, alignItems: "center" },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  ghostLink: { ...font.bodyStrong, color: colors.muted, textAlign: "center", marginTop: space.lg },
 });

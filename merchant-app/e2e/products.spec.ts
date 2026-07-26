@@ -26,15 +26,44 @@ async function signIn(page: Page) {
   await page.getByTestId("tab-products").click();
 }
 
+/**
+ * The Products tab now opens on the LIST, with the add/edit form behind a
+ * toggle (so the merchant's first view is "what do I have"). Open the form
+ * before filling it. Adding keeps the form open for rapid multi-add, so one
+ * call per test is enough.
+ */
+async function openAddForm(page: Page) {
+  await page.getByTestId("show-add-form").click();
+  await expect(page.getByTestId("product-name")).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe("Merchant products", () => {
   test.beforeEach(async ({ page }) => forceEnglish(page));
+
+  test("the tab opens on the product LIST, with the add form behind a toggle", async ({ page }) => {
+    // The reported complaint was "there is no page to see my products". The list
+    // was always there — below the add form. It is now the primary content.
+    await signIn(page);
+    // The list (seeded 20 products) is visible immediately; the form is not.
+    await expect(page.getByTestId("product-row").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("product-name")).toHaveCount(0);
+    await expect(page.getByTestId("show-add-form")).toBeVisible();
+
+    // Tapping the toggle reveals the form; Close hides it again — list still there.
+    await page.getByTestId("show-add-form").click();
+    await expect(page.getByTestId("product-name")).toBeVisible();
+    await page.getByTestId("close-add-form").click();
+    await expect(page.getByTestId("product-name")).toHaveCount(0);
+    await expect(page.getByTestId("product-row").first()).toBeVisible();
+  });
 
   test("add a product, edit its price, toggle stock, then delete it", async ({ page }) => {
     await signIn(page);
 
     const name = `[E2E] Widget ${Date.now()}`;
 
-    // --- Add ---
+    // --- Add (open the form first — the tab now opens on the list) ---
+    await openAddForm(page);
     await page.getByTestId("product-name").fill(name);
     await page.getByTestId("product-price").fill("0.55");
     await page.getByTestId("category-picker").click();
@@ -90,6 +119,7 @@ test.describe("Merchant products", () => {
 
   test("adding without a category is refused (server-validated)", async ({ page }) => {
     await signIn(page);
+    await openAddForm(page);
     await page.getByTestId("product-name").fill(`[E2E] NoCat ${Date.now()}`);
     await page.getByTestId("product-price").fill("0.50");
     // No category chosen.
@@ -102,6 +132,7 @@ test.describe("Merchant products", () => {
     const name = `[E2E] Stock ${Date.now()}`;
 
     // Add a product (starts in stock), then mark it out of stock.
+    await openAddForm(page);
     await page.getByTestId("product-name").fill(name);
     await page.getByTestId("product-price").fill("0.50");
     await page.getByTestId("category-picker").click();
@@ -139,6 +170,7 @@ test.describe("Merchant products", () => {
     await signIn(page);
     const name = `[E2E] Undo ${Date.now()}`;
 
+    await openAddForm(page);
     await page.getByTestId("product-name").fill(name);
     await page.getByTestId("product-price").fill("0.50");
     await page.getByTestId("category-picker").click();
@@ -177,6 +209,8 @@ test.describe("Merchant products", () => {
     const cheap = `[E2E] ${token} aaa`; // alphabetically first, cheapest
     const dear = `[E2E] ${token} zzz`; // alphabetically last, dearest
 
+    // Form stays open across adds, so open it once before the loop.
+    await openAddForm(page);
     for (const [n, price] of [
       [dear, "9.90"],
       [cheap, "0.10"],
@@ -220,6 +254,7 @@ test.describe("Merchant products", () => {
     // match the buttons, not the product name.
     const name = `[E2E] Sponge ${Date.now()}`;
 
+    await openAddForm(page);
     await page.getByTestId("product-name").fill(name);
     await page.getByTestId("product-price").fill("0.50");
     await page.getByTestId("category-picker").click();

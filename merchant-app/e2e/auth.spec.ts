@@ -102,6 +102,72 @@ test.describe("Merchant app auth", () => {
     await expect(page.getByTestId("tab-products")).toHaveCount(0);
   });
 
+  test("the header shows WHO is signed in — never a silent, unnamed session", async ({ page }) => {
+    await signIn(page, SEEDED_MERCHANT);
+    await expect(page.getByTestId("merchant-header")).toBeVisible({ timeout: 15_000 });
+    // Identity is on screen: the signed-in phone number, from the server (/auth/me).
+    await expect(page.getByTestId("signed-in-as")).toContainText("962791234567");
+  });
+
+  test("signing out and back in as a DIFFERENT shop shows the new account, not the old", async ({
+    page,
+  }) => {
+    // The founder's exact worry: on one device, does a new login truly replace the
+    // previous account, or does a stale session bleed through?
+    await signIn(page, SEEDED_MERCHANT);
+    await expect(page.getByTestId("merchant-header")).toHaveText("Al-Nus Dinar Shop", {
+      timeout: 15_000,
+    });
+    await expect(page.getByTestId("signed-in-as")).toContainText("962791234567");
+
+    await page.getByTestId("sign-out").click();
+    await expect(page.getByTestId("phone-input")).toBeVisible();
+
+    // Register + sign in as a brand-new shop in the SAME browser.
+    const phone = reservedPhone();
+    const shopName = `[TEST] Second Shop ${Date.now()}`;
+    await page.getByTestId("to-register").click();
+    await page.getByTestId("reg-shop-name").fill(shopName);
+    await page.getByTestId("reg-phone").fill(phone);
+    await page.getByTestId("register-shop").click();
+    await expect(page.getByText("Shop registered")).toBeVisible({ timeout: 15_000 });
+
+    await page.getByTestId("phone-input").fill(phone);
+    await page.getByTestId("send-code").click();
+    await expect(page.getByTestId("code-input")).toHaveValue(/^\d{6}$/, { timeout: 15_000 });
+    await page.getByTestId("verify-code").click();
+
+    // The identity is the NEW shop — the previous account never shows through.
+    await expect(page.getByTestId("merchant-header")).toHaveText(shopName, { timeout: 15_000 });
+    await expect(page.getByTestId("merchant-header")).not.toHaveText("Al-Nus Dinar Shop");
+    await expect(page.getByTestId("signed-in-as")).toContainText(phone.replace(/^0/, "962"));
+  });
+
+  test("a restored session does NOT open the shop when the server is unreachable", async ({
+    page,
+  }) => {
+    // THE reported bug: launching before the backend is up used to restore the old
+    // token and show a merchant screen nobody had signed into. Now it must show a
+    // reconnect prompt, never the shell.
+    await signIn(page, SEEDED_MERCHANT);
+    await expect(page.getByTestId("merchant-header")).toBeVisible({ timeout: 15_000 });
+
+    // Simulate the backend being unreachable (identity call fails at the network
+    // level → the ApiError status-0 branch).
+    await page.route("**/auth/me", (route) => route.abort());
+    await page.reload();
+
+    // Reconnect prompt — and crucially, NOT the shop.
+    await expect(page.getByTestId("reconnect-retry")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("merchant-header")).toHaveCount(0);
+    await expect(page.getByTestId("tab-products")).toHaveCount(0);
+
+    // Backend comes up: unblock, retry → the shop appears (session was intact).
+    await page.unroute("**/auth/me");
+    await page.getByTestId("reconnect-retry").click();
+    await expect(page.getByTestId("merchant-header")).toBeVisible({ timeout: 15_000 });
+  });
+
   test("the session survives a reload, and signing out ends it for good", async ({ page }) => {
     await signIn(page, SEEDED_MERCHANT);
     await expect(page.getByTestId("merchant-header")).toBeVisible({ timeout: 15_000 });

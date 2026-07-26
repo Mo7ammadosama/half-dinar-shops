@@ -58,6 +58,13 @@ export function ProductsScreen() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // The add/edit form is hidden behind a toggle so the tab opens on the LIST —
+  // the shopkeeper's first question is "what do I have", not "add something".
+  const [showForm, setShowForm] = useState(false);
+  // Distinct from `error` (which also carries form/validation messages): true
+  // when the product list itself failed to load, so we can offer a Retry instead
+  // of a bare empty state (the cold-backend case).
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -69,7 +76,9 @@ export function ProductsScreen() {
   const loadProducts = useCallback(async (term: string) => {
     try {
       setProducts(await api.listProducts(term || undefined));
+      setLoadFailed(false);
     } catch (err) {
+      setLoadFailed(true);
       setError((err as Error).message);
     }
   }, []);
@@ -115,6 +124,7 @@ export function ProductsScreen() {
     setEditingId(null);
     setSuggestion(null);
     setShowCategories(false);
+    setShowForm(false);
   }
 
   async function handleSubmit() {
@@ -134,10 +144,16 @@ export function ProductsScreen() {
       const wasEditing = Boolean(editingId);
       if (editingId) {
         await api.updateProduct(editingId, payload);
+        // Editing is a one-off: close the form and return to the list.
+        resetForm();
       } else {
         await api.createProduct(payload);
+        // Adding: keep the form open with cleared fields so the shopkeeper can
+        // add several items in a row without re-opening it each time.
+        setForm(EMPTY_FORM);
+        setSuggestion(null);
+        setShowCategories(false);
       }
-      resetForm();
       await loadProducts(search);
       setToast({ message: wasEditing ? t("products.toastSaved") : t("products.toastAdded"), tone: "ok" });
     } catch (err) {
@@ -199,6 +215,7 @@ export function ProductsScreen() {
 
   function startEdit(product: Product) {
     setEditingId(product.id);
+    setShowForm(true);
     setConfirmDeleteId(null);
     setForm({
       name: product.name,
@@ -257,13 +274,41 @@ export function ProductsScreen() {
       <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
         {error && (
           <View style={styles.errorBox} testID="products-error">
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={styles.errorText}>{loadFailed ? t("products.loadFailed") : error}</Text>
+            {loadFailed && (
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => void loadProducts(search)}
+                testID="products-retry"
+              >
+                <Text style={styles.retryButtonText}>{t("products.retry")}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
+      {/* Add-product toggle — keeps the tab opening on the LIST, form on demand. */}
+      {!showForm && (
+        <TouchableOpacity
+          style={styles.addToggle}
+          onPress={() => setShowForm(true)}
+          testID="show-add-form"
+        >
+          <Text style={styles.addToggleText}>{t("products.addNewProduct")}</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Add / edit form */}
+      {showForm && (
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>{editingId ? t("products.editProduct") : t("products.addProduct")}</Text>
+        <View style={styles.formHeadRow}>
+          <Text style={styles.cardTitle}>{editingId ? t("products.editProduct") : t("products.addProduct")}</Text>
+          {!editingId && (
+            <TouchableOpacity onPress={resetForm} testID="close-add-form">
+              <Text style={styles.closeFormText}>{t("products.closeForm")}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Photo → AI entry */}
         <View style={styles.photoRow}>
@@ -398,6 +443,7 @@ export function ProductsScreen() {
           )}
         </View>
       </View>
+      )}
 
       {/* Product list */}
       <View style={styles.listHead}>
@@ -533,6 +579,25 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   cardTitle: { ...font.h2, color: colors.ink, marginBottom: space.md },
+  formHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  closeFormText: { ...font.small, color: colors.muted, fontWeight: "700", marginBottom: space.md },
+  addToggle: {
+    backgroundColor: colors.brand,
+    borderRadius: radius.sm,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: space.lg,
+  },
+  addToggleText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  retryButton: {
+    alignSelf: "flex-start",
+    marginTop: space.sm,
+    backgroundColor: colors.danger,
+    borderRadius: radius.sm,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.lg,
+  },
+  retryButtonText: { color: "#fff", fontWeight: "700" },
   photoRow: { flexDirection: "row", gap: space.md, alignItems: "center" },
   photoPreview: { width: 84, height: 84, borderRadius: radius.md, backgroundColor: colors.cardAlt },
   photoPlaceholder: { alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line },
