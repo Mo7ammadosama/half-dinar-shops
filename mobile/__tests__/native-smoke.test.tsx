@@ -34,45 +34,57 @@ beforeEach(() => {
 
 afterEach(() => jest.restoreAllMocks());
 
-async function renderAndSettle(element: React.ReactElement) {
+/**
+ * Renders, settles the mount effects, asserts the tree exists, then UNMOUNTS it.
+ *
+ * Unmounting matters: several screens (and now App's startup session-verify)
+ * kick off async work — a fetch, a lazy `require`, a timer. If the tree is left
+ * mounted, that work can resolve *after* the Jest environment is torn down and
+ * throw "trying to import a file after the Jest environment has been torn down",
+ * which fails the suite only when another suite runs alongside it. Unmounting
+ * inside act() stops those updates deterministically. (Same reason the
+ * merchant-app native-smoke unmounts.)
+ */
+async function renderSettleUnmount(element: React.ReactElement) {
   let tree: ReturnType<typeof create> | undefined;
   await act(async () => {
     tree = create(element);
   });
-  // Flush the mount effects (session restore, first fetch) and everything they
-  // chain into. A single `await Promise.resolve()` only drains one microtask,
-  // which was not enough to settle the fetch chain.
+  // Flush the mount effects (session restore, verify, first fetch) and their chain.
   await act(async () => {
     await new Promise((resolve) => setImmediate(resolve));
   });
-  return tree!;
+  const json = tree!.toJSON();
+  await act(async () => {
+    tree!.unmount();
+  });
+  return json;
 }
 
 it("renders the app root without crashing on native", async () => {
   const App = require("../App").default;
-  const tree = await renderAndSettle(<App />);
-  expect(tree.toJSON()).toBeTruthy();
+  expect(await renderSettleUnmount(<App />)).toBeTruthy();
 });
 
 it("renders the login screen (first screen a new user sees) on native", async () => {
   const { LoginScreen } = require("../src/LoginScreen");
-  const tree = await renderAndSettle(<LoginScreen onSignedIn={() => {}} />);
-  expect(tree.toJSON()).toBeTruthy();
+  expect(await renderSettleUnmount(<LoginScreen onSignedIn={() => {}} />)).toBeTruthy();
 });
 
 it("renders the shop list (the landing screen) on native", async () => {
   const { ShopsScreen } = require("../src/ShopsScreen");
-  const tree = await renderAndSettle(
-    <ShopsScreen
-      onSelectShop={() => {}}
-      onSignOut={() => {}}
-      place={{ kind: "unset" }}
-      onPlaceChange={() => {}}
-      savedArea={null}
-      onAreaChosen={() => {}}
-    />,
-  );
-  expect(tree.toJSON()).toBeTruthy();
+  expect(
+    await renderSettleUnmount(
+      <ShopsScreen
+        onSelectShop={() => {}}
+        onSignOut={() => {}}
+        place={{ kind: "unset" }}
+        onPlaceChange={() => {}}
+        savedArea={null}
+        onAreaChosen={() => {}}
+      />,
+    ),
+  ).toBeTruthy();
 });
 
 it("renders the browse screen for a shop on native", async () => {
@@ -85,8 +97,7 @@ it("renders the browse screen for a shop on native", async () => {
     openingHours: "08:00-23:00",
     productCount: 20,
   };
-  const tree = await renderAndSettle(<BrowseScreen shop={shop} onBack={() => {}} />);
-  expect(tree.toJSON()).toBeTruthy();
+  expect(await renderSettleUnmount(<BrowseScreen shop={shop} onBack={() => {}} />)).toBeTruthy();
 });
 
 it("resolves an API base URL from the Expo host on native", () => {

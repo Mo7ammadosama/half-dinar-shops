@@ -2559,3 +2559,119 @@ Explicitly **deferred, with reasons** (see `docs/PRODUCT_AUDIT.md §3`):
 - **DB restored** to the pristine seed (1 shop / 20 products / 0 orders; Energy Drink back to
   out-of-stock). Note: the seed had drifted (Energy Drink was available, 5 stray orders) from prior
   sessions — restored via `db:reset-orders` → `db:clean-test-data` → `seed`.
+
+---
+
+## Phase 14 — Customer critical bugs (OTP, stale session, order) + merchant warnings ✅
+
+**Autonomous pass (founder away). Every decision logged here.** Three customer-app bugs the founder
+hit on real devices, plus a mandate to clean up merchant-app warnings.
+
+### Diagnosis was empirical, not assumed
+
+Before touching code, each bug was reproduced against the running backend:
+- **OTP request + verify for a brand-new number: works perfectly over the API.** So bug #1 is NOT a
+  backend or payload bug.
+- **Placing an order with a valid token: works** (order created, PENDING). So bug #3 is NOT an
+  order-creation bug.
+- **An invalid/garbage token → 401**, and the customer app **handled 401 nowhere** (`grep` proved it).
+  That single gap explains both #2 and #3.
+
+### Bug #2 + #3 — the real, shared root cause: no 401 handling (FIXED)
+
+The customer app restored a saved token on launch and rendered the signed-in shell **without ever
+verifying it**. A stale/revoked token then 401'd on every request — `listShops` (trapped on a broken
+"signed in" screen, bug #2) and `placeOrder` (order silently failed, bug #3). This is the **same class**
+the merchant app was fixed for in Phase 13, and it genuinely was **not** fixed in the customer app.
+
+**Fix (two layers):**
+1. **Global 401 handler** in `mobile/src/api.ts` (`setUnauthorizedHandler`), fired from `call()` — but
+   **gated on `authToken && status === 401`**. This gate is load-bearing: `/auth/otp/verify` returns
+   **401 for a wrong login code** with no token attached; without the gate, every mistyped code would
+   trip a bogus "session expired". Verified the status codes by curl first.
+2. **Startup token verification** via `/auth/me` in `App.tsx` before showing the shell: 401 → clear +
+   sign-in with a **"Your session ended"** notice; offline/other → keep the token (the shop list has
+   its own retry). The 401 handler is recursion-safe (makes no API calls — a 401 is what brought us
+   there).
+
+**Proven:** 5 new e2e in `mobile/e2e/auth-session.spec.ts`, incl. "a revoked session lands on sign-in
+with a notice, not a broken shell", "an order with a dead token returns to sign-in", and "a real order
+reaches the merchant's queue" (cross-checked server-side via the merchant API). **Both fix layers
+sabotage-verified independently** — disabling the startup verify fails the revoked-session test;
+disabling the 401 handler fails the dead-token-order test; reverting makes both green; no sabotage text
+left.
+
+### Bug #1 — OTP fails on a real phone: root-caused + hardened + tunnel-path verified by curl
+
+The backend OTP flow works (proven above and on the web target). The on-device "immediate red error"
+is **API-base resolution**: on plain `expo start --tunnel`, `hostUri` is a `*.exp.direct` host and the
+app derives `http://*.exp.direct:3000/api`, which the Metro tunnel does not forward — dead. The intended
+fix already exists: **`npm run start:remote`**, which opens a cloudflared tunnel to the API and injects
+its URL into `extra.apiBase`.
+
+**Evidence obtained without a device (the achievable proof):** opened the real cloudflared API tunnel
+(`mobile/.tunnel/cloudflared.exe tunnel --url http://localhost:3000`) and hit **`/auth/otp/request`
+AND `/auth/otp/verify` for a brand-new number over the public `https://…trycloudflare.com/api` URL** —
+both succeeded (devCode returned, CUSTOMER token issued). That is exactly the path a real phone using
+`start:remote` takes. Tunnel torn down afterward (it exposes the dev backend).
+
+**Client hardening:** the OTP request now uses `withConnectRetry` (retries only status-0 connection
+failures, safe on a POST that never reached the server) with a **"Connecting…"** state instead of an
+instant dead-end, and `api.ts` logs the resolved API base in dev so an on-device mismatch is
+diagnosable from the Metro console. New e2e proves the OTP request auto-retries a flaky connection and
+recovers. **⚠️ Honest limit: no physical-device tap was possible here** — the flow is proven E2E over
+the API, the web target, and the real public tunnel, but not on hardware. If the founder still sees the
+error on a phone, they are not using `start:remote` (the Metro log now prints the resolved API base to
+confirm).
+
+### Merchant warnings — i18next Intl.PluralRules (FIXED, both apps)
+
+Root cause: i18next v4 (CLDR) plural resolution needs `Intl.PluralRules`, which Hermes on device ships
+without — so it warned and `_one/_other` keys fell back. **Fix: the `intl-pluralrules` polyfill**
+(pure JS, safe on the eager startup path) imported first in each Expo app's `src/i18n/index.ts`.
+**Deliberately NOT `compatibilityJSON: 'v3'`** — that would stop the v4-style keys resolving (a silent
+regression). Proven the polyfill installs `Intl.PluralRules` in a runtime lacking it and resolves
+Arabic's zero/few/many categories. Applied to the **customer app too** (the founder named only the
+merchant) — same latent warning, consistency; small, logged call. `expo-doctor` unchanged at 17/18 (no
+new issue from the dependency).
+
+Also fixed a test-only leak surfaced by the startup verify: the customer `native-smoke` test now
+**unmounts** each rendered tree (matching the merchant one), stopping "import after teardown" async
+leaks that only failed when suites ran together.
+
+**Console sweep (to back "fixed the warnings" with evidence, not an assertion).** Captured the merchant
+app's browser console over a real signed-in session (Playwright `page.on("console")`): after the
+PluralRules fix, the only remaining messages are **two react-native-web deprecations** — `"shadow*"
+style props are deprecated. Use "boxShadow"` and `props.pointerEvents is deprecated. Use
+style.pointerEvents`. These are **web-target-only** (react-native-web maps RN styles to CSS and warns);
+they come from the shared `theme.ts` shadow tokens and from RN **core** components (e.g. the
+`ActivityIndicator`/`Touchable` internals emit `pointerEvents`), are **pre-existing** (not introduced
+this pass), and do **not** appear on the shipped native runtime. Left as-is deliberately: "fixing" the
+shadow one means cross-app platform-conditional styling that risks a native shadow regression for a
+cosmetic web-console message, and the `pointerEvents` one is inside RN core, not our code — documented
+rather than chased (the founder's named warning, PluralRules, is genuinely fixed).
+
+**Known thin spot noted, not built (different from the reported bug).** `CartScreen.handlePlaceOrder`
+does `if (!shopId) return;` — a null `shopId` makes "Place order" a silent no-op with no error. That is
+a *different* way an order could "not go through" than the token bug the founder hit (which was
+confirmed and fixed). In practice `shopId` is set whenever a cart exists, so it is latent; recorded here
+so a future pass can surface an error instead of a silent return.
+
+### Test + attack pass — all green (run live)
+
+- **Backend: 18 db + 383 e2e (17 suites)** — full red-team cross-role + attack-surface + OTP/throttle,
+  re-run, no regression (zero backend/src changes).
+- **Customer app: 41 e2e** (incl. 5 new bug tests, all session/order/connection specs) **+ 19 jest.**
+- **Merchant app: 24 e2e + 8 jest** — plural rendering intact after the polyfill.
+- **Admin: 13 e2e.** All four projects typecheck clean.
+
+### Decisions & honesty notes
+
+- **No `backend/src` change** — the customer 401 fix reuses the existing `/auth/me` and `401` semantics.
+- **Dependency added:** `intl-pluralrules@^2.0.1` in both Expo apps (the correct, minimal fix).
+- **`npm audit`** remains non-zero in the Expo apps (the pre-existing SDK-54 toolchain advisories from
+  Phase 13; `intl-pluralrules` is a clean pure-JS package and did not add to them). Not force-fixed
+  (would jump to SDK 57 — forbidden).
+- **Verification is web-target + API + real tunnel, not a physical device** for the session/keystore and
+  OTP-on-hardware paths (same B5/B6b caveat class). Stated plainly rather than glossed.
+- **DB restored** to the pristine seed (1 shop / 20 products / 0 orders).

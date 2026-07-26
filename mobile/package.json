@@ -13,6 +13,7 @@
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.9",
     "i18next": "^23.16.8",
+    "intl-pluralrules": "^2.0.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-i18next": "^14.1.3",

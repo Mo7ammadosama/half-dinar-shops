@@ -35,6 +35,16 @@ function resolveApiBase(): string {
 
 export const API_BASE = resolveApiBase();
 
+// Surface the resolved API base in the Metro logs during development. On a real
+// phone this is the fastest way to diagnose "Cannot reach the server": if it is
+// not the tunnel/LAN URL you expect (e.g. it says localhost, or a tunnel host
+// with :3000 that the tunnel does not forward), that is the cause — use
+// `npm run start:remote`. Stripped from production bundles.
+if (__DEV__) {
+  // eslint-disable-next-line no-console
+  console.log(`[api] resolved API base → ${API_BASE}`);
+}
+
 export interface Shop {
   id: string;
   shopName: string;
@@ -172,6 +182,18 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+/**
+ * Called when the server rejects a request we made WITH a session token as 401 —
+ * i.e. the saved token is expired/revoked. The app uses this to clear the dead
+ * session and return to sign-in, instead of trapping the customer on a
+ * "signed in" screen where nothing loads (the stale-session bug).
+ */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set("Content-Type", "application/json");
@@ -188,7 +210,13 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isJson = res.headers.get("content-type")?.includes("application/json");
   const body = isJson ? await res.json() : null;
 
-  if (!res.ok) throw new ApiError(readError(body), res.status);
+  if (!res.ok) {
+    // A 401 means "your session is dead" ONLY if we actually presented a session.
+    // The OTP endpoints legitimately return 401 for a wrong/expired login code
+    // with no token attached — that must NOT trigger a session reset mid-login.
+    if (res.status === 401 && authToken) onUnauthorized?.();
+    throw new ApiError(readError(body), res.status);
+  }
   return body as T;
 }
 
@@ -230,6 +258,14 @@ export const api = {
       "/auth/otp/verify",
       { method: "POST", body: JSON.stringify({ phoneNumber, code }) },
     ),
+
+  /**
+   * The signed-in identity, straight from the token. Used on launch to prove a
+   * restored token is still valid before showing the signed-in app — a stale or
+   * revoked token 401s here and lands the customer cleanly on sign-in.
+   */
+  me: () =>
+    call<{ id: string; phoneNumber: string; role: string }>("/auth/me"),
 
   /**
    * Registers this device for order notifications (launch blocker B6).

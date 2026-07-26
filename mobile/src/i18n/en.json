@@ -20,6 +20,8 @@
     "yourPhone": "Your phone number",
     "textHint": "We'll text you a code to sign in.",
     "sendCode": "Send code",
+    "sessionEnded": "Your session ended. Please sign in again.",
+    "connecting": "Connecting to the server…",
     "enterCode": "Enter the 6-digit code",
     "sentTo": "Sent to {{phone}}",
     "signIn": "Sign in",

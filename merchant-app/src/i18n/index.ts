@@ -21,6 +21,12 @@
  *     fully mirror RTL, so on web we additionally set document.dir — that is what
  *     makes the direction real (and testable) on the web target.
  */
+// Polyfill Intl.PluralRules BEFORE i18next initialises. Hermes/older JS engines
+// on device ship without it, and i18next's v4 (CLDR) plural resolution needs it —
+// otherwise it logs "environment not Intl.PluralRules ready" and plural keys
+// (_one/_other) silently fall back. Pure JS, no native module, safe on the eager
+// startup path. Must be the FIRST import so it runs before init() below.
+import "intl-pluralrules";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { I18nManager, Platform } from "react-native";
 import i18n from "i18next";

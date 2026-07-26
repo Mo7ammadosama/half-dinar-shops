@@ -18,24 +18,42 @@ import {
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
-import { api } from "./api";
+import { api, withConnectRetry } from "./api";
 import { LanguageToggle } from "./i18n/LanguageToggle";
 import { colors } from "./theme";
 
-export function LoginScreen({ onSignedIn }: { onSignedIn: (token: string) => void }) {
+export function LoginScreen({
+  onSignedIn,
+  sessionEnded = false,
+}: {
+  onSignedIn: (token: string) => void;
+  /** True when we returned here because a saved session expired. */
+  sessionEnded?: boolean;
+}) {
   const { t } = useTranslation();
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [code, setCode] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(
+    sessionEnded ? t("login.sessionEnded") : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // True while auto-retrying a connection that failed, so the button can say
+  // "Connecting…" instead of appearing to hang. A briefly-unreachable backend
+  // (e.g. just started) then self-heals without the customer doing anything.
+  const [connecting, setConnecting] = useState(false);
 
   async function handleRequestCode() {
     setBusy(true);
     setError(null);
+    setConnecting(false);
     try {
-      const res = await api.requestOtp(phoneNumber);
+      // Retry ONLY connection failures (status 0). The request never reached the
+      // server, so re-sending cannot duplicate anything.
+      const res = await withConnectRetry(() => api.requestOtp(phoneNumber), {
+        onRetry: () => setConnecting(true),
+      });
       if (res.devCode) {
         // No SMS provider yet: the API returns the code outside production.
         setCode(res.devCode);
@@ -48,6 +66,7 @@ export function LoginScreen({ onSignedIn }: { onSignedIn: (token: string) => voi
       setError((err as Error).message);
     } finally {
       setBusy(false);
+      setConnecting(false);
     }
   }
 
@@ -111,7 +130,10 @@ export function LoginScreen({ onSignedIn }: { onSignedIn: (token: string) => voi
               testID="send-code"
             >
               {busy ? (
-                <ActivityIndicator color="#fff" />
+                <View style={styles.busyRow}>
+                  <ActivityIndicator color="#fff" />
+                  {connecting && <Text style={styles.busyText}>{t("login.connecting")}</Text>}
+                </View>
               ) : (
                 <Text style={styles.buttonText}>{t("login.sendCode")}</Text>
               )}
@@ -206,6 +228,8 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.5 },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  busyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  busyText: { color: "#fff", fontWeight: "600", fontSize: 13 },
   link: { color: colors.brand, textAlign: "center", marginTop: 14, fontWeight: "600" },
   alert: { borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1 },
   alertError: { backgroundColor: "#fef2f2", borderColor: "#fecaca" },
