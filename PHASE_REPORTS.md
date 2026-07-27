@@ -2675,3 +2675,71 @@ so a future pass can surface an error instead of a silent return.
 - **Verification is web-target + API + real tunnel, not a physical device** for the session/keystore and
   OTP-on-hardware paths (same B5/B6b caveat class). Stated plainly rather than glossed.
 - **DB restored** to the pristine seed (1 shop / 20 products / 0 orders).
+
+---
+
+## Phase 15 — Customer app accepted a non-CUSTOMER token (the "requires the CUSTOMER role" 403) ✅
+
+**Autonomous pass (founder away).** Third pass on this bug class; this time the symptom was a raw
+`403 "This endpoint requires the CUSTOMER role"` at checkout.
+
+### Diagnosis — ran the founder's EXACT repro, not a code-read
+
+The founder's hypothesis was cross-app **storage bleed** (customer app picking up the merchant's
+token). I proved otherwise empirically:
+- **Token keys are already distinct** — `halfdinar.customer.token` vs `halfdinar.merchant.token` (the
+  literal localStorage keys, confirmed by dumping storage after a real sign-in).
+- **Ran the founder's exact sequence** (merchant token placed under the MERCHANT key, then load the
+  customer app): the customer app shows **sign-in** — it never reads the merchant key. **No bleed.**
+- **The real cause:** a valid **MERCHANT/ADMIN token under the CUSTOMER's own key** — which happens
+  when a tester signs into the *customer app itself* with the shop/admin number. Curl proved the
+  mechanism precisely: that token gets **200 on `/auth/me`**, **200 on `/shops`** (browse works), then
+  **403 on `POST /orders`**. My Phase-14 fix only caught **401** (invalid token); a valid-but-wrong-role
+  token sailed through browse and died at the order — exactly the founder's symptom.
+
+### Fix — a role gate, at both the front door and on the way in (client-only)
+
+1. **Sign-in role check** (`LoginScreen`): the verify response carries `user.role`; a non-CUSTOMER is
+   refused up front with a clear message and never signed in.
+2. **Startup role check** (`App.tsx`): the existing `/auth/me` restore-verify now also checks
+   `role === "CUSTOMER"`; a shop/admin token is cleared and lands on sign-in with a reason. This is
+   what rescues a tester who *already* has a merchant token in the customer key.
+3. **Role-403 handler** (`api.ts`): a 403 whose message matches the role guard (`/requires the .*role/i`)
+   made **with a token** is treated like an invalid session → clean re-auth, never the raw string.
+   **Scoped deliberately:** a `grep` of the API showed the ONLY customer-reachable `ForbiddenException`
+   is this role guard (the other two are merchant-only "shop suspended"), so this cannot eject a
+   customer mid-flow. Defense-in-depth — the two checks above make it unreachable in normal use.
+4. **Friendly copy** (`login.wrongRole`, AR+EN): "registered as a shop or admin, not a customer…".
+
+**No storage re-keying** — the keys are already isolated; inventing a new namespace would churn all
+three apps and log out existing sessions for no gain. **No backend change** — role comes from the
+existing `/auth/me` + verify response.
+
+### Proven
+
+- **3 new e2e** (`mobile/e2e/role-isolation.spec.ts`): the customer app **ignores** the merchant key
+  (isolation); a merchant token in the customer key → **clean re-auth, never a raw order 403**; signing
+  into the customer app with the shop number is **refused cleanly**.
+- **Both role checks sabotage-verified** independently (disable the startup check → the injected-token
+  test fails; disable the sign-in check → the shop-number test fails; revert → all green; no sabotage
+  text left).
+
+### Test + attack pass
+
+- **Customer app: 44 e2e (+3 new) + 19 jest** — all prior session/order/connection specs still green
+  (the role checks didn't regress Phase-14's auth-session tests).
+- **Backend: 18 db + 383 e2e** (attack suite re-run, no regression) — confirms the server still
+  enforces the role (the client fix is presentation over an already-correct server).
+- **Merchant: 8 jest.** Merchant (24 e2e) and admin (13 e2e) **code is byte-unchanged this pass**
+  (`git status` shows only `mobile/`), so their Phase-14 green runs stand; not re-run to avoid
+  redundant Expo/dashboard swaps.
+- All typechecks clean. **No `backend/src`, `merchant-app/`, or `merchant-dashboard/` change.**
+
+### Gotcha logged (test infra, not a code bug)
+
+The per-phone OTP limit **persists in Redis** and the `loginMerchant` test helper re-requests a code
+for the same seeded merchant every run — after enough runs it 429s ("Too many login codes… for this
+number"), which surfaces as "merchant OTP verify should succeed → false" and looks like a code
+regression. Fix: run the backend with `RATE_LIMIT_OTP_PER_PHONE_PER_HOUR=100000` (the documented e2e
+env) and, if already throttled, flush the `ratelimit:*` Redis keys. Same family as the Phase-8 note.
+DB restored to the pristine seed afterward.

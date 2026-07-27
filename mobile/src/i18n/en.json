@@ -21,6 +21,7 @@
     "textHint": "We'll text you a code to sign in.",
     "sendCode": "Send code",
     "sessionEnded": "Your session ended. Please sign in again.",
+    "wrongRole": "This number is registered as a shop or admin, not a customer. Shop owners use the merchant app and admins use the web console. Please sign in with a customer number.",
     "connecting": "Connecting to the server…",
     "enterCode": "Enter the 6-digit code",
     "sentTo": "Sent to {{phone}}",

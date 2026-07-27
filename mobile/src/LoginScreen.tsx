@@ -18,26 +18,30 @@ import {
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
-import { api, withConnectRetry } from "./api";
+import { api, withConnectRetry, type SessionInvalidReason } from "./api";
 import { LanguageToggle } from "./i18n/LanguageToggle";
 import { colors } from "./theme";
 
 export function LoginScreen({
   onSignedIn,
-  sessionEnded = false,
+  notice: noticeReason = null,
 }: {
   onSignedIn: (token: string) => void;
-  /** True when we returned here because a saved session expired. */
-  sessionEnded?: boolean;
+  /** Why we're back here: a saved session that expired, or a shop/admin token. */
+  notice?: SessionInvalidReason | null;
 }) {
   const { t } = useTranslation();
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [code, setCode] = useState("");
+  // "expired" is informational (green notice); "wrongRole" is a problem with the
+  // account they used, so it reads as an error (red), matching the sign-in path.
   const [notice, setNotice] = useState<string | null>(
-    sessionEnded ? t("login.sessionEnded") : null,
+    noticeReason === "expired" ? t("login.sessionEnded") : null,
   );
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    noticeReason === "wrongRole" ? t("login.wrongRole") : null,
+  );
   const [busy, setBusy] = useState(false);
   // True while auto-retrying a connection that failed, so the button can say
   // "Connecting…" instead of appearing to hang. A briefly-unreachable backend
@@ -75,6 +79,16 @@ export function LoginScreen({
     setError(null);
     try {
       const res = await api.verifyOtp(phoneNumber, code);
+      // This is the CUSTOMER app: a shop/admin number is a valid login but the
+      // wrong account here. Refuse it up front with a clear message instead of
+      // signing them in and letting checkout fail with "requires the CUSTOMER role".
+      if (res.user.role !== "CUSTOMER") {
+        setNotice(null);
+        setError(t("login.wrongRole"));
+        setStep("phone");
+        setCode("");
+        return;
+      }
       onSignedIn(res.accessToken);
     } catch (err) {
       setError((err as Error).message);

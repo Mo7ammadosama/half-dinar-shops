@@ -183,15 +183,28 @@ export function setAuthToken(token: string | null) {
 }
 
 /**
- * Called when the server rejects a request we made WITH a session token as 401 —
- * i.e. the saved token is expired/revoked. The app uses this to clear the dead
- * session and return to sign-in, instead of trapping the customer on a
- * "signed in" screen where nothing loads (the stale-session bug).
+ * Why a session made with our token got rejected:
+ *  - "expired": a 401 — the saved token is expired/revoked.
+ *  - "wrongRole": a 403 from the role guard — the token is valid but belongs to a
+ *    non-customer (a shop or admin account). Browsing works with such a token but
+ *    ordering 403s ("requires the CUSTOMER role"); catching it here lets the app
+ *    return to a clean sign-in instead of surfacing that raw backend string.
+ * In both cases the app clears the dead/wrong session and returns to sign-in,
+ * rather than trapping the customer on a screen where the key action fails.
  */
-let onUnauthorized: (() => void) | null = null;
+export type SessionInvalidReason = "expired" | "wrongRole";
 
-export function setUnauthorizedHandler(handler: (() => void) | null) {
-  onUnauthorized = handler;
+let onSessionInvalid: ((reason: SessionInvalidReason) => void) | null = null;
+
+export function setUnauthorizedHandler(
+  handler: ((reason: SessionInvalidReason) => void) | null,
+) {
+  onSessionInvalid = handler;
+}
+
+/** True for the role-guard's 403 message ("This endpoint requires the CUSTOMER role."). */
+function isWrongRoleError(message: string): boolean {
+  return /requires the .*role/i.test(message);
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -211,11 +224,20 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = isJson ? await res.json() : null;
 
   if (!res.ok) {
-    // A 401 means "your session is dead" ONLY if we actually presented a session.
-    // The OTP endpoints legitimately return 401 for a wrong/expired login code
-    // with no token attached — that must NOT trigger a session reset mid-login.
-    if (res.status === 401 && authToken) onUnauthorized?.();
-    throw new ApiError(readError(body), res.status);
+    const message = readError(body);
+    // These matter ONLY if we actually presented a session. The OTP endpoints
+    // legitimately 401 for a wrong login code with NO token attached — that must
+    // never trigger a session reset mid-login.
+    if (authToken) {
+      if (res.status === 401) onSessionInvalid?.("expired");
+      // A 403 from the role guard: a valid but non-customer token. (The only
+      // customer-reachable 403 in the API is this role check — the other two
+      // ForbiddenExceptions are on merchant-only endpoints — so this cannot eject
+      // a customer mid-flow.) Defense-in-depth: the sign-in and startup role
+      // checks make this unreachable in normal use.
+      else if (res.status === 403 && isWrongRoleError(message)) onSessionInvalid?.("wrongRole");
+    }
+    throw new ApiError(message, res.status);
   }
   return body as T;
 }

@@ -1,7 +1,13 @@
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { api, setAuthToken, setUnauthorizedHandler, type Shop } from "./src/api";
+import {
+  api,
+  setAuthToken,
+  setUnauthorizedHandler,
+  type SessionInvalidReason,
+  type Shop,
+} from "./src/api";
 import { BrowseScreen } from "./src/BrowseScreen";
 import { ErrorBoundary } from "./src/ErrorBoundary";
 import { LoginScreen } from "./src/LoginScreen";
@@ -20,10 +26,10 @@ export default function App() {
   // null = not signed in; undefined = still restoring the saved session.
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [area, setArea] = useState<string | null>(null);
-  // True when we returned to sign-in because the saved session was rejected
-  // (expired/revoked), so the login screen can say why rather than silently
-  // showing a fresh form.
-  const [sessionEnded, setSessionEnded] = useState(false);
+  // Set when we returned to sign-in because the saved session was rejected — the
+  // login screen shows why ("expired" vs a shop/admin token in "wrongRole")
+  // rather than silently showing a fresh form.
+  const [loginNotice, setLoginNotice] = useState<SessionInvalidReason | null>(null);
 
   // Delivery location, lifted here so it survives navigating in and out of a
   // shop. The shop list uses it to sort shops by distance.
@@ -32,27 +38,29 @@ export default function App() {
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
 
   /**
-   * Ends a session that the SERVER rejected (a 401 on a request we made with a
-   * token). Deliberately makes NO API calls — the 401 is exactly what brought us
-   * here, so calling the API again (e.g. to unregister push) would only 401 in a
-   * loop. Clears the dead token and drops the customer on sign-in with a notice.
+   * Ends a session the SERVER rejected — a 401 (expired/revoked) or a role 403
+   * (a valid but non-customer token). Deliberately makes NO API calls — that
+   * rejection is exactly what brought us here, so re-calling the API (e.g. to
+   * unregister push) would only fail again. Clears the token and drops the
+   * customer on sign-in with a reason.
    */
-  const endExpiredSession = useCallback(() => {
+  const endSession = useCallback((reason: SessionInvalidReason) => {
     setAuthToken(null);
     void clearToken();
     setSelectedShop(null);
-    setSessionEnded(true);
+    setLoginNotice(reason);
     setToken(null);
   }, []);
 
-  // Any request made WITH a token that comes back 401 means the saved session is
-  // dead — clear it and return to sign-in instead of trapping the customer on a
-  // "signed in" screen where nothing loads. (The api layer gates this to 401s
-  // that actually presented a token, so a wrong OTP code never trips it.)
+  // A request made WITH a token that comes back 401 (dead session) or a role 403
+  // (a shop/admin token in the customer app) returns the customer to a clean
+  // sign-in — never a trapped shell, and never a raw "requires the CUSTOMER role"
+  // string. (The api layer gates this to responses that actually presented a
+  // token, so a wrong OTP code never trips it.)
   useEffect(() => {
-    setUnauthorizedHandler(endExpiredSession);
+    setUnauthorizedHandler(endSession);
     return () => setUnauthorizedHandler(null);
-  }, [endExpiredSession]);
+  }, [endSession]);
 
   // Restore the saved session on launch so a returning customer skips login —
   // but VERIFY it with the server first. A stale/revoked token must land on
@@ -71,8 +79,14 @@ export default function App() {
       }
       setAuthToken(saved);
       try {
-        // Prove the token is still valid before trusting it.
-        await api.me();
+        // Prove the token is still valid AND belongs to a customer before trusting
+        // it. A shop/admin token can browse but 403s at checkout — catch it here
+        // so the tester lands on a clean sign-in, not a shell that fails to order.
+        const me = await api.me();
+        if (me.role !== "CUSTOMER") {
+          endSession("wrongRole");
+          return;
+        }
         setToken(saved);
       } catch (err) {
         const status = (err as { status?: number }).status;
@@ -90,7 +104,7 @@ export default function App() {
   }, []);
 
   async function handleSignedIn(newToken: string) {
-    setSessionEnded(false);
+    setLoginNotice(null);
     setAuthToken(newToken);
     await saveToken(newToken);
     setToken(newToken);
@@ -133,7 +147,7 @@ export default function App() {
       ) : (
         <View style={styles.flex}>
           {!token ? (
-            <LoginScreen onSignedIn={handleSignedIn} sessionEnded={sessionEnded} />
+            <LoginScreen onSignedIn={handleSignedIn} notice={loginNotice} />
           ) : selectedShop ? (
             <BrowseScreen shop={selectedShop} onBack={() => setSelectedShop(null)} />
           ) : (
